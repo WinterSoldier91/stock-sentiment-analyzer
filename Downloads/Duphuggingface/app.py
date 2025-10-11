@@ -252,14 +252,26 @@ col1, col2 = st.columns([3, 1])
 with col1:
     ticker = st.text_input('Enter Stock Ticker', '').upper()
 with col2:
-    view_mode = st.selectbox('View', ['Historical (7 days)', 'Historical (30 days)'], index=1)
+    view_mode = st.selectbox('View', ['Historical (7 days)', 'Historical (30 days)', 'Historical (90 days)', 'Historical (6 months)', 'Historical (1 year)'], index=1)
 
 if ticker:
     try:
         st.subheader(f"📈 TradingView Test for {ticker}")
         
         # Get historical data
-        days = 7 if '7' in view_mode else 30
+        if '7' in view_mode:
+            days = 7
+        elif '30' in view_mode:
+            days = 30
+        elif '90' in view_mode:
+            days = 90
+        elif '6 months' in view_mode:
+            days = 180  # 6 months = ~180 days
+        elif '1 year' in view_mode:
+            days = 365  # 1 year = 365 days
+        else:
+            days = 30  # default fallback
+        
         historical_df = get_historical_data(ticker, days=days)
         
         if len(historical_df) > 0:
@@ -314,19 +326,19 @@ if ticker:
             # Charts
             col1, col2 = st.columns(2)
             with col1:
-                st.write("**Hourly Chart (TradingView)**")
-                plot_hourly_sentiment(historical_df, ticker, f" ({days} Days)")
+                st.write(f"**{ticker} Hourly Sentiment Scores ({view_mode.replace('Historical (', '').replace(')', '')})**")
+                plot_hourly_sentiment(historical_df, ticker, f" ({view_mode.replace('Historical (', '').replace(')', '')})")
             with col2:
-                st.write("**Daily Chart (TradingView)**")
-                plot_daily_sentiment(historical_df, ticker, f" ({days} Days)")
+                st.write(f"**{ticker} Daily Sentiment Scores ({view_mode.replace('Historical (', '').replace(')', '')})**")
+                plot_daily_sentiment(historical_df, ticker, f" ({view_mode.replace('Historical (', '').replace(')', '')})")
             
             # Show some data
             st.subheader("Sample Data")
             st.dataframe(historical_df.head(10))
         else:
             st.warning(f"No historical data available for {ticker}. Try running the main app first to collect data.")
-    
-    except Exception as e:
+	
+except Exception as e:
         st.error(f"Error: {str(e)}")
 
 else:
