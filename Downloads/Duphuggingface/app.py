@@ -337,8 +337,8 @@ if ticker:
             st.dataframe(historical_df.head(10))
         else:
             st.warning(f"No historical data available for {ticker}. Try running the main app first to collect data.")
-	
-except Exception as e:
+
+    except Exception as e:
         st.error(f"Error: {str(e)}")
 
 else:
