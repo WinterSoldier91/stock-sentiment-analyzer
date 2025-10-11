@@ -1,0 +1,7 @@
+streamlit
+pandas
+nltk
+urllib3
+beautifulsoup4
+plotly
+pytz
