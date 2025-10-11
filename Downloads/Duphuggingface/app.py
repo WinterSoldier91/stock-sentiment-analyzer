@@ -1,10 +1,14 @@
 import streamlit as st
+from streamlit_lightweight_charts import renderLightweightCharts
 from urllib.request import urlopen, Request
 from bs4 import BeautifulSoup
 import pandas as pd
-import plotly
-import plotly.express as px
-import json # for graph plotting in website
+import sqlite3
+import time
+import random
+from datetime import datetime, timedelta
+import pytz
+
 # NLTK VADER for sentiment analysis
 import nltk
 import ssl
@@ -17,148 +21,330 @@ else:
 nltk.download('vader_lexicon', quiet=True)
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
-import subprocess
-import os
+st.set_page_config(
+    page_title="TradingView Test - Stock Sentiment Analyzer", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-import datetime
-import pytz
+# Database setup
+DB_NAME = 'sentiment_history.db'
+CACHE_MINUTES = 15  # Cache data for 15 minutes
 
-st.set_page_config(page_title = "Bohmian's Stock News Sentiment Analyzer", layout = "wide")
-
-
-def get_news(ticker):
-    url = finviz_url + ticker
-    req = Request(url=url,headers={'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:20.0) Gecko/20100101 Firefox/20.0'}) 
-    response = urlopen(req)    
-    # Read the contents of the file into 'html'
-    html = BeautifulSoup(response)
-    # Find 'news-table' in the Soup and load it into 'news_table'
-    news_table = html.find(id='news-table')
-    return news_table
-	
-# parse news into dataframe
-def parse_news(news_table):
-    parsed_news = []
-    ist = pytz.timezone('Asia/Kolkata')
-    today_string = datetime.datetime.now(ist).strftime('%Y-%m-%d')
+def init_database():
+    """Initialize SQLite database for historical data storage"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
     
-    for x in news_table.findAll('tr'):
-        try:
-            # read the text from each tr tag into text
-            # get text from a only
-            text = x.a.get_text() 
-            # splite text in the td tag into a list 
-            date_scrape = x.td.text.split()
-            # if the length of 'date_scrape' is 1, load 'time' as the only element
+    # Create sentiment history table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sentiment_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            headline TEXT NOT NULL,
+            sentiment_score REAL NOT NULL,
+            negative REAL,
+            neutral REAL,
+            positive REAL,
+            article_datetime TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            source_date TEXT
+        )
+    ''')
+    
+    # Create cache metadata table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cache_metadata (
+            ticker TEXT PRIMARY KEY,
+            last_fetch_time TEXT NOT NULL,
+            article_count INTEGER NOT NULL
+        )
+    ''')
+    
+    # Create index for faster queries
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_ticker_datetime 
+        ON sentiment_history(ticker, article_datetime)
+    ''')
+    
+    conn.commit()
+    conn.close()
 
-            if len(date_scrape) == 1:
-                time = date_scrape[0]
-                
-            # else load 'date' as the 1st element and 'time' as the second    
-            else:
-                date = date_scrape[0]
-                time = date_scrape[1]
+def get_historical_data(ticker, days=30):
+    """Retrieve historical data from database"""
+    conn = sqlite3.connect(DB_NAME)
+    
+    ist = pytz.timezone('Asia/Kolkata')
+    cutoff_date = (datetime.now(ist) - timedelta(days=days)).isoformat()
+    
+    query = '''
+        SELECT article_datetime, sentiment_score, headline, negative, neutral, positive
+        FROM sentiment_history
+        WHERE ticker = ? AND article_datetime >= ?
+        ORDER BY article_datetime DESC
+    '''
+    
+    df = pd.read_sql_query(query, conn, params=(ticker, cutoff_date))
+    conn.close()
+    
+    if len(df) > 0:
+        df['article_datetime'] = pd.to_datetime(df['article_datetime'])
+        df = df.set_index('article_datetime')
+    
+    return df
+
+def create_tradingview_chart_data(data, chart_type):
+    """Prepare data for streamlit-lightweight-charts with manual IST offset"""
+    
+    # Ensure IST timezone awareness
+    ist = pytz.timezone('Asia/Kolkata')
+    utc = pytz.utc
+    
+    # Make the data index timezone-aware if it isn't already
+    if data.index.tz is None:
+        data.index = data.index.tz_localize(ist)
+    elif str(data.index.tz) != 'Asia/Kolkata':
+        data.index = data.index.tz_convert(ist)
+    
+    # Forward-fill gaps (keep in IST for now)
+    if len(data) > 0:
+        freq = 'h' if chart_type == 'hourly' else 'D'
+        complete_range = pd.date_range(
+            start=data.index.min(),
+            end=data.index.max(),
+            freq=freq,
+            tz=ist  # Explicitly set timezone
+        )
+        filled_data = data.reindex(complete_range)
+        filled_data['sentiment_score'] = filled_data['sentiment_score'].ffill()
+        filled_data = filled_data.dropna()
+    else:
+        filled_data = data
+    
+    # Convert to TradingView format with manual IST offset
+    chart_data = []
+    IST_OFFSET_SECONDS = 19800  # 5 hours 30 minutes in seconds
+    
+    for timestamp, row in filled_data.iterrows():
+        if chart_type == 'hourly':
+            # Convert IST to UTC, then add IST offset to display in IST
+            timestamp_utc = timestamp.astimezone(utc)
+            # Add IST offset so chart displays IST time correctly
+            time_value = int(timestamp_utc.timestamp()) + IST_OFFSET_SECONDS
+        else:
+            # Daily: Use date string (no timezone needed)
+            time_value = timestamp.strftime('%Y-%m-%d')
+        
+        chart_data.append({
+            "time": time_value,
+            "value": float(row['sentiment_score'])
+        })
+    
+    return chart_data
+
+def plot_hourly_sentiment(data, ticker, title_suffix=""):
+    """Create hourly chart using streamlit-lightweight-charts"""
+    mean_scores = data.resample('h').mean(numeric_only=True)
+    
+    if len(mean_scores) == 0:
+        st.warning("No hourly data available")
+        return
+    
+    chart_data = create_tradingview_chart_data(mean_scores, 'hourly')
+    
+    # Use streamlit-lightweight-charts package
+    chart_options = [{
+        "chart": {
+            "height": 400,
+            "layout": {
+                "background": {"color": "#0e1117"},
+                "textColor": "#fafafa"
+            },
+            "grid": {
+                "vertLines": {"color": "#262730"},
+                "horzLines": {"color": "#262730"}
+            },
+            "crosshair": {
+                "mode": 0  # Normal mode
+            },
+            "timeScale": {
+                "timeVisible": True,
+                "secondsVisible": False,
+                "hoursVisible": True,
+                "minutesVisible": True,
+                "borderVisible": True
+            }
+        },
+        "series": [{
+            "type": "Histogram",
+            "data": chart_data,
+            "options": {
+                "color": "#00d4ff",
+                "priceFormat": {
+                    "type": "price",
+                    "precision": 3,
+                    "minMove": 0.001
+                }
+            }
+        }]
+    }]
+    
+    renderLightweightCharts(chart_options, key=f"hourly_{ticker}")
+
+def plot_daily_sentiment(data, ticker, title_suffix=""):
+    """Create daily chart using streamlit-lightweight-charts"""
+    mean_scores = data.resample('d').mean(numeric_only=True)
+    
+    if len(mean_scores) == 0:
+        st.warning("No daily data available")
+        return
+    
+    chart_data = create_tradingview_chart_data(mean_scores, 'daily')
+    
+    # Use streamlit-lightweight-charts package
+    chart_options = [{
+        "chart": {
+            "height": 400,
+            "layout": {
+                "background": {"color": "#0e1117"},
+                "textColor": "#fafafa"
+            },
+            "grid": {
+                "vertLines": {"color": "#262730"},
+                "horzLines": {"color": "#262730"}
+            },
+            "crosshair": {
+                "mode": 0  # Normal mode
+            },
+            "timeScale": {
+                "timeVisible": True,
+                "secondsVisible": False,
+                "hoursVisible": True,
+                "minutesVisible": True,
+                "borderVisible": True
+            }
+        },
+        "series": [{
+            "type": "Histogram",
+            "data": chart_data,
+            "options": {
+                "color": "#00d4ff",
+                "priceFormat": {
+                    "type": "price",
+                    "precision": 3,
+                    "minMove": 0.001
+                }
+            }
+        }]
+    }]
+    
+    renderLightweightCharts(chart_options, key=f"daily_{ticker}")
+
+# Initialize database
+init_database()
+
+st.header("🧪 TradingView Lightweight Charts Test")
+
+st.info("🔬 **Testing Environment**: This is a local test version with TradingView Lightweight Charts. The main app uses Plotly and is safe.")
+
+# Input section
+col1, col2 = st.columns([3, 1])
+with col1:
+    ticker = st.text_input('Enter Stock Ticker', '').upper()
+with col2:
+    view_mode = st.selectbox('View', ['Historical (7 days)', 'Historical (30 days)'], index=1)
+
+if ticker:
+    try:
+        st.subheader(f"📈 TradingView Test for {ticker}")
+        
+        # Get historical data
+        days = 7 if '7' in view_mode else 30
+        historical_df = get_historical_data(ticker, days=days)
+        
+        if len(historical_df) > 0:
+            st.success(f"✅ Found {len(historical_df)} articles in database")
             
-            # Append ticker, date, time and headline as a list to the 'parsed_news' list
-            parsed_news.append([date, time, text]) 
-        except:
-            pass
+            # Calculate comprehensive metrics
+            hourly_scores = historical_df.resample('h').mean(numeric_only=True)
+            daily_scores = historical_df.resample('d').mean(numeric_only=True)
+            
+            # Calculate current and previous sentiment values
+            current_sentiment = float(hourly_scores.iloc[-1].iloc[0]) if len(hourly_scores) > 0 else 0.0
+            previous_sentiment = float(hourly_scores.iloc[-2].iloc[0]) if len(hourly_scores) > 1 else current_sentiment
+            delta_sentiment = current_sentiment - previous_sentiment
+            
+            # Data range
+            min_date = historical_df.index.min()
+            max_date = historical_df.index.max()
+            data_range = f"{min_date.strftime('%b %d')} - {max_date.strftime('%b %d, %H:%M')}"
+            
+            # Display comprehensive metrics dashboard
+            st.subheader("📊 Analytics Dashboard")
+            
+            # Row 1: Data Collection Metrics
+            col1, col2, col3, col4, col5 = st.columns(5)
+            with col1:
+                st.metric("📰 Total Articles", len(historical_df))
+            with col2:
+                st.metric("⏱️ Hourly Bars", len(hourly_scores.dropna()))
+            with col3:
+                st.metric("📅 Daily Bars", len(daily_scores.dropna()))
+            with col4:
+                st.metric("📈 Data Coverage", data_range)
+            with col5:
+                st.metric("🕐 Latest Update", max_date.strftime('%H:%M'))
+            
+            # Row 2: Sentiment Analysis Metrics
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            with col1:
+                st.metric("🎯 Current Sentiment", f"{current_sentiment:.3f}", 
+                         delta=f"{delta_sentiment:.3f}" if len(hourly_scores) > 1 else None)
+            with col2:
+                st.metric("📊 Previous Sentiment", f"{previous_sentiment:.3f}")
+            with col3:
+                st.metric("📈 Average Sentiment", f"{historical_df['sentiment_score'].mean():.3f}")
+            with col4:
+                st.metric("⬆️ Highest Sentiment", f"{historical_df['sentiment_score'].max():.3f}")
+            with col5:
+                st.metric("⬇️ Lowest Sentiment", f"{historical_df['sentiment_score'].min():.3f}")
+            with col6:
+                st.metric("📊 Volatility", f"{historical_df['sentiment_score'].std():.3f}")
+            
+            # Charts
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Hourly Chart (TradingView)**")
+                plot_hourly_sentiment(historical_df, ticker, f" ({days} Days)")
+            with col2:
+                st.write("**Daily Chart (TradingView)**")
+                plot_daily_sentiment(historical_df, ticker, f" ({days} Days)")
+            
+            # Show some data
+            st.subheader("Sample Data")
+            st.dataframe(historical_df.head(10))
+        else:
+            st.warning(f"No historical data available for {ticker}. Try running the main app first to collect data.")
     
-    # Set column names
-    columns = ['date', 'time', 'headline']
-    # Convert the parsed_news list into a DataFrame called 'parsed_and_scored_news'
-    parsed_news_df = pd.DataFrame(parsed_news, columns=columns)        
-    # Create a pandas datetime object from the strings in 'date' and 'time' column
-    parsed_news_df['date'] = parsed_news_df['date'].replace("Today", today_string)
-    parsed_news_df['datetime'] = pd.to_datetime(parsed_news_df['date'] + ' ' + parsed_news_df['time'], format='mixed')
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+
+else:
+    st.info("👆 Enter a stock ticker above to test TradingView charts")
+    st.write("""
+    ### Testing Features:
+    - **TradingView Lightweight Charts**: Professional charting library
+    - **Forward-fill gaps**: Continuous data for crosshair functionality
+    - **Crosshair everywhere**: Shows sentiment values at any cursor position
+    - **Dark theme**: Matches your app's styling
     
-    # Convert timestamps from US Eastern to IST
-    eastern = pytz.timezone('US/Eastern')
-    ist = pytz.timezone('Asia/Kolkata')
-    parsed_news_df['datetime'] = parsed_news_df['datetime'].dt.tz_localize(eastern).dt.tz_convert(ist)
-    
-    return parsed_news_df
-        
-    
-        
-def score_news(parsed_news_df):
-    # Instantiate the sentiment intensity analyzer
-    vader = SentimentIntensityAnalyzer()
-    
-    # Iterate through the headlines and get the polarity scores using vader
-    scores = parsed_news_df['headline'].apply(vader.polarity_scores).tolist()
+    ### How to test:
+    1. Enter a stock ticker (e.g., "BTC")
+    2. Charts will render using TradingView Lightweight Charts
+    3. Move cursor anywhere on chart - crosshair should show values
+    4. Compare with main app's Plotly charts
+    """)
 
-    # Convert the 'scores' list of dicts into a DataFrame
-    scores_df = pd.DataFrame(scores)
-
-    # Join the DataFrames of the news and the list of dicts
-    parsed_and_scored_news = parsed_news_df.join(scores_df, rsuffix='_right')        
-    parsed_and_scored_news = parsed_and_scored_news.set_index('datetime')    
-    parsed_and_scored_news = parsed_and_scored_news.drop(columns=['date', 'time'])          
-    parsed_and_scored_news = parsed_and_scored_news.rename(columns={"compound": "sentiment_score"})
-
-    return parsed_and_scored_news
-
-
-def plot_hourly_sentiment(parsed_and_scored_news, ticker):
-   
-    # Group by date and ticker columns from scored_news and calculate the mean
-    mean_scores = parsed_and_scored_news.resample('h').mean(numeric_only=True)
-
-    # Plot a bar chart with plotly 
-    fig = px.bar(mean_scores, x=mean_scores.index, y='sentiment_score', title = ticker + ' Hourly Sentiment Scores')
-    return fig # instead of using fig.show(), we return fig and turn it into a graphjson object for displaying in web page later
-
-def plot_daily_sentiment(parsed_and_scored_news, ticker):
-   
-    # Group by date and ticker columns from scored_news and calculate the mean
-    mean_scores = parsed_and_scored_news.resample('d').mean(numeric_only=True)
-
-    # Plot a bar chart with plotly
-    fig = px.bar(mean_scores, x=mean_scores.index, y='sentiment_score', title = ticker + ' Daily Sentiment Scores')
-    return fig # instead of using fig.show(), we return fig and turn it into a graphjson object for displaying in web page later
-
-# for extracting data from finviz
-finviz_url = 'https://finviz.com/quote.ashx?t='
-
-
-st.header("Bohmian's Stock News Sentiment Analyzer")
-
-ticker = st.text_input('Enter Stock Ticker', '').upper()
-
-df = pd.DataFrame({'datetime': datetime.datetime.now(), 'ticker': ticker}, index = [0])
-
-
-try:
-	st.subheader("Hourly and Daily Sentiment of {} Stock".format(ticker))
-	news_table = get_news(ticker)
-	parsed_news_df = parse_news(news_table)
-	print(parsed_news_df)
-	parsed_and_scored_news = score_news(parsed_news_df)
-	fig_hourly = plot_hourly_sentiment(parsed_and_scored_news, ticker)
-	fig_daily = plot_daily_sentiment(parsed_and_scored_news, ticker) 
-	 
-	st.plotly_chart(fig_hourly)
-	st.plotly_chart(fig_daily)
-
-	description = """
-		The above chart averages the sentiment scores of {} stock hourly and daily.
-		The table below gives each of the most recent headlines of the stock and the negative, neutral, positive and an aggregated sentiment score.
-		The news headlines are obtained from the FinViz website.
-		Sentiments are given by the nltk.sentiment.vader Python library.
-		""".format(ticker)
-		
-	st.write(description)	 
-	st.table(parsed_and_scored_news)
-	
-except Exception as e:
-	print(str(e))
-	st.write("Enter a correct stock ticker, e.g. 'AAPL' above and hit Enter.")	
-
-hide_streamlit_style = """
-<style>
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-</style>
-"""
-st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
+# Footer
+st.markdown("---")
+st.caption("🧪 Testing Environment | 💾 Uses same database as main app | 🔄 Safe to experiment")

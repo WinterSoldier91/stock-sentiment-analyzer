@@ -1,7 +1,7 @@
 streamlit
 pandas
-nltk
-urllib3
 beautifulsoup4
+nltk
 plotly
 pytz
+streamlit-lightweight-charts
