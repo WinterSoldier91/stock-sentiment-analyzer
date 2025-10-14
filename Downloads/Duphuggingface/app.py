@@ -27,6 +27,50 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Inject premium CDN resources
+premium_cdn = """
+<!-- Premium Typography -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+<!-- Premium Icons -->
+<script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+<!-- Tailwind CSS for utility classes -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          'bg-primary': '#0a0e1a',
+          'bg-secondary': '#151b2e',
+          'bg-tertiary': '#1e2538',
+          'accent-primary': '#6366f1',
+          'accent-secondary': '#8b5cf6',
+          'success': '#10b981',
+          'warning': '#f59e0b',
+          'danger': '#ef4444',
+          'text-primary': '#f8fafc',
+          'text-secondary': '#94a3b8',
+          'border': '#2d3548'
+        },
+        fontFamily: {
+          'inter': ['Inter', 'sans-serif'],
+          'mono': ['JetBrains Mono', 'monospace'],
+          'manrope': ['Manrope', 'sans-serif']
+        }
+      }
+    }
+  }
+</script>
+"""
+st.markdown(premium_cdn, unsafe_allow_html=True)
+
 # Database setup
 DB_NAME = 'sentiment_history.db'
 CACHE_MINUTES = 15  # Cache data for 15 minutes
@@ -243,101 +287,259 @@ def plot_daily_sentiment(data, ticker, title_suffix=""):
 # Initialize database
 init_database()
 
-st.header("🧪 TradingView Lightweight Charts Test")
+# Import future article fixer
+from future_article_fixer import check_future_articles, fix_future_articles, ignore_future_article
+
+# Professional Header with Navigation
+professional_header = """
+<div class="professional-header">
+    <div class="header-container">
+        <div class="header-left">
+            <div class="logo-section">
+                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M3 13H11V3H3V13ZM3 21H11V15H3V21ZM13 21H21V11H13V21ZM13 3V9H21V3H13Z" fill="currentColor"/>
+                </svg>
+                <div class="brand-text">
+                    <h1 class="brand-title">TradingView Pro</h1>
+                    <p class="brand-subtitle">Professional Chart Analysis Platform</p>
+                </div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="status-indicators">
+                <div class="status-item">
+                    <i class="ph ph-chart-line"></i>
+                    <span>TradingView Charts</span>
+                </div>
+                <div class="status-item">
+                    <i class="ph ph-database"></i>
+                    <span>Historical Data</span>
+                </div>
+                <div class="status-item">
+                    <i class="ph ph-clock"></i>
+                    <span>IST</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+"""
+st.markdown(professional_header, unsafe_allow_html=True)
+
+# Check for future-dated articles and show fix option
+future_summary, future_count, future_articles_detail = check_future_articles()
+if future_count > 0:
+    st.warning(f"⚠️ **Future-Dated Articles Detected**")
+    st.text(future_summary)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔧 Fix Future-Dated Articles", type="primary"):
+            with st.spinner("Fixing future-dated articles by fetching correct timestamps from FinViz..."):
+                result = fix_future_articles()
+                
+            if result['fixed'] > 0:
+                st.success(f"✅ **Fixed {result['fixed']} articles!**")
+            if result['not_found'] > 0:
+                st.warning(f"⚠️ **{result['not_found']} articles not found on FinViz**")
+                st.info("These articles may have been removed from FinViz. You can ignore them individually below.")
+            if result['errors'] > 0:
+                st.error(f"❌ {result['errors']} tickers had errors during processing")
+            
+            st.info("🔄 **Please refresh the page to see updated data**")
+            st.stop()
+    
+    # Show individual articles with ignore option
+    if future_count > 0:
+        st.subheader("📋 Individual Articles")
+        for ticker, article_id, headline, article_dt in future_articles_detail:
+            col_a, col_b = st.columns([4, 1])
+            with col_a:
+                st.text(f"{ticker}: {headline[:80]}...")
+                st.caption(f"Timestamp: {article_dt}")
+            with col_b:
+                if st.button(f"🗑️ Ignore", key=f"ignore_{article_id}"):
+                    ignore_future_article(article_id)
+                    st.success(f"✅ **Article deleted** - Warning will no longer appear")
+                    st.info("🔄 **Please refresh the page**")
+                    st.stop()
 
 st.info("🔬 **Testing Environment**: This is a local test version with TradingView Lightweight Charts. The main app uses Plotly and is safe.")
 
-# Input section
+# Enhanced Input Section (Streamlit-only, no duplicates)
+input_section = """
+<div class="input-section">
+    <div class="input-container">
+        <div class="input-wrapper">
+            <div class="input-icon">
+                <i class="ph ph-magnifying-glass"></i>
+            </div>
+            <div class="input-content">
+                <label class="input-label">Enter Stock Ticker</label>
+            </div>
+        </div>
+        <div class="view-selector-wrapper">
+            <label class="input-label">View Mode</label>
+        </div>
+    </div>
+</div>
+"""
+st.markdown(input_section, unsafe_allow_html=True)
+
+# Create columns for the actual Streamlit inputs (styled but functional)
 col1, col2 = st.columns([3, 1])
 with col1:
-    ticker = st.text_input('Enter Stock Ticker', '').upper()
+    # Popular ticker options
+    popular_tickers = ['BTC', 'ETH', 'SOL', 'AMZN', 'GOOGL', 'TSLA', 'MSTR', 'AAPL']
+    
+    # Create a custom input with dropdown suggestions
+    ticker_input_container = st.container()
+    with ticker_input_container:
+        col_input, col_dropdown = st.columns([2, 1])
+        
+        with col_input:
+            ticker = st.text_input('Enter Stock Ticker', '', key='ticker_input', placeholder='e.g., BTC, AAPL, TSLA').upper()
+        
+        with col_dropdown:
+            selected_ticker = st.selectbox(
+                'Popular Tickers',
+                ['Select...'] + popular_tickers,
+                key='ticker_dropdown',
+                help='Choose from popular tickers'
+            )
+            
+            # If user selects from dropdown, update the text input
+            if selected_ticker != 'Select...':
+                ticker = selected_ticker
+
 with col2:
-    view_mode = st.selectbox('View', ['Historical (7 days)', 'Historical (30 days)', 'Historical (90 days)', 'Historical (6 months)', 'Historical (1 year)'], index=1)
+    view_mode = st.selectbox('View', ['Historical (7 days)', 'Historical (30 days)'], index=1, key='view_selector')
 
 if ticker:
     try:
         st.subheader(f"📈 TradingView Test for {ticker}")
         
         # Get historical data
-        if '7' in view_mode:
-            days = 7
-        elif '30' in view_mode:
-            days = 30
-        elif '90' in view_mode:
-            days = 90
-        elif '6 months' in view_mode:
-            days = 180  # 6 months = ~180 days
-        elif '1 year' in view_mode:
-            days = 365  # 1 year = 365 days
-        else:
-            days = 30  # default fallback
-        
+        days = 7 if '7' in view_mode else 30
         historical_df = get_historical_data(ticker, days=days)
         
         if len(historical_df) > 0:
             st.success(f"✅ Found {len(historical_df)} articles in database")
             
-            # Calculate comprehensive metrics
-            hourly_scores = historical_df.resample('h').mean(numeric_only=True)
-            daily_scores = historical_df.resample('d').mean(numeric_only=True)
+            # Enhanced Chart Containers
+            chart_section = """
+            <div class="charts-section">
+                <div class="charts-header">
+                    <h3 class="charts-title">
+                        <i class="ph ph-chart-line"></i>
+                        TradingView Professional Charts
+                    </h3>
+                    <div class="chart-controls">
+                        <button class="chart-control-btn active" data-chart="hourly">
+                            <i class="ph ph-clock"></i>
+                            Hourly
+                        </button>
+                        <button class="chart-control-btn" data-chart="daily">
+                            <i class="ph ph-calendar"></i>
+                            Daily
+                        </button>
+                    </div>
+                </div>
+            </div>
+            """
+            st.markdown(chart_section, unsafe_allow_html=True)
             
-            # Calculate current and previous sentiment values
-            current_sentiment = float(hourly_scores.iloc[-1].iloc[0]) if len(hourly_scores) > 0 else 0.0
-            previous_sentiment = float(hourly_scores.iloc[-2].iloc[0]) if len(hourly_scores) > 1 else current_sentiment
-            delta_sentiment = current_sentiment - previous_sentiment
-            
-            # Data range
-            min_date = historical_df.index.min()
-            max_date = historical_df.index.max()
-            data_range = f"{min_date.strftime('%b %d')} - {max_date.strftime('%b %d, %H:%M')}"
-            
-            # Display comprehensive metrics dashboard
-            st.subheader("📊 Analytics Dashboard")
-            
-            # Row 1: Data Collection Metrics
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                st.metric("📰 Total Articles", len(historical_df))
-            with col2:
-                st.metric("⏱️ Hourly Bars", len(hourly_scores.dropna()))
-            with col3:
-                st.metric("📅 Daily Bars", len(daily_scores.dropna()))
-            with col4:
-                st.metric("📈 Data Coverage", data_range)
-            with col5:
-                st.metric("🕐 Latest Update", max_date.strftime('%H:%M'))
-            
-            # Row 2: Sentiment Analysis Metrics
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
-            with col1:
-                st.metric("🎯 Current Sentiment", f"{current_sentiment:.3f}", 
-                         delta=f"{delta_sentiment:.3f}" if len(hourly_scores) > 1 else None)
-            with col2:
-                st.metric("📊 Previous Sentiment", f"{previous_sentiment:.3f}")
-            with col3:
-                st.metric("📈 Average Sentiment", f"{historical_df['sentiment_score'].mean():.3f}")
-            with col4:
-                st.metric("⬆️ Highest Sentiment", f"{historical_df['sentiment_score'].max():.3f}")
-            with col5:
-                st.metric("⬇️ Lowest Sentiment", f"{historical_df['sentiment_score'].min():.3f}")
-            with col6:
-                st.metric("📊 Volatility", f"{historical_df['sentiment_score'].std():.3f}")
-            
-            # Charts
+            # Charts with professional wrappers
             col1, col2 = st.columns(2)
             with col1:
-                st.write(f"**{ticker} Hourly Sentiment Scores ({view_mode.replace('Historical (', '').replace(')', '')})**")
-                plot_hourly_sentiment(historical_df, ticker, f" ({view_mode.replace('Historical (', '').replace(')', '')})")
+                chart_wrapper = """
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <h4 class="chart-title">
+                            <i class="ph ph-clock"></i>
+                            Hourly Sentiment Trend
+                        </h4>
+                        <div class="chart-actions">
+                            <button class="chart-action-btn" title="Export Chart">
+                                <i class="ph ph-download"></i>
+                            </button>
+                            <button class="chart-action-btn" title="Full Screen">
+                                <i class="ph ph-arrows-out"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-content">
+                """
+                st.markdown(chart_wrapper, unsafe_allow_html=True)
+                plot_hourly_sentiment(historical_df, ticker, f" ({days} Days)")
+                st.markdown("</div></div>", unsafe_allow_html=True)
+                
             with col2:
-                st.write(f"**{ticker} Daily Sentiment Scores ({view_mode.replace('Historical (', '').replace(')', '')})**")
-                plot_daily_sentiment(historical_df, ticker, f" ({view_mode.replace('Historical (', '').replace(')', '')})")
+                chart_wrapper = """
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <h4 class="chart-title">
+                            <i class="ph ph-calendar"></i>
+                            Daily Sentiment Trend
+                        </h4>
+                        <div class="chart-actions">
+                            <button class="chart-action-btn" title="Export Chart">
+                                <i class="ph ph-download"></i>
+                            </button>
+                            <button class="chart-action-btn" title="Full Screen">
+                                <i class="ph ph-arrows-out"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-content">
+                """
+                st.markdown(chart_wrapper, unsafe_allow_html=True)
+                plot_daily_sentiment(historical_df, ticker, f" ({days} Days)")
+                st.markdown("</div></div>", unsafe_allow_html=True)
             
-            # Show some data
-            st.subheader("Sample Data")
-            st.dataframe(historical_df.head(10))
+            # Enhanced Data Table
+            table_section = """
+            <div class="data-table-section">
+                <div class="table-header">
+                    <h3 class="table-title">
+                        <i class="ph ph-table"></i>
+                        Sample Data
+                    </h3>
+                    <div class="table-actions">
+                        <button class="table-action-btn" title="Export CSV">
+                            <i class="ph ph-download"></i>
+                            Export
+                        </button>
+                        <button class="table-action-btn" title="Refresh Data">
+                            <i class="ph ph-arrow-clockwise"></i>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>
+            """
+            st.markdown(table_section, unsafe_allow_html=True)
+            
+            # Display the table with custom styling
+            st.dataframe(
+                historical_df[['headline', 'sentiment_score']].head(10),
+                column_config={
+                    "headline": st.column_config.TextColumn(
+                        "Headline",
+                        width="large",
+                    ),
+                    "sentiment_score": st.column_config.NumberColumn(
+                        "Sentiment Score",
+                        format="%.3f",
+                    ),
+                },
+                hide_index=True,
+                use_container_width=True
+            )
         else:
             st.warning(f"No historical data available for {ticker}. Try running the main app first to collect data.")
-
+    
     except Exception as e:
         st.error(f"Error: {str(e)}")
 
@@ -357,6 +559,598 @@ else:
     4. Compare with main app's Plotly charts
     """)
 
-# Footer
-st.markdown("---")
-st.caption("🧪 Testing Environment | 💾 Uses same database as main app | 🔄 Safe to experiment")
+# Professional Footer
+professional_footer = f"""
+<div class="professional-footer">
+    <div class="footer-container">
+        <div class="footer-content">
+            <div class="footer-section">
+                <h4 class="footer-title">TradingView Features</h4>
+                <div class="footer-item">
+                    <i class="ph ph-chart-line"></i>
+                    <span>Lightweight Charts</span>
+                </div>
+                <div class="footer-item">
+                    <i class="ph ph-crosshair"></i>
+                    <span>Crosshair Everywhere</span>
+                </div>
+                <div class="footer-item">
+                    <i class="ph ph-timer"></i>
+                    <span>Real-time Updates</span>
+                </div>
+            </div>
+            <div class="footer-section">
+                <h4 class="footer-title">Data Management</h4>
+                <div class="footer-item">
+                    <i class="ph ph-database"></i>
+                    <span>SQLite Database</span>
+                </div>
+                <div class="footer-item">
+                    <i class="ph ph-clock"></i>
+                    <span>IST Timezone</span>
+                </div>
+                <div class="footer-item">
+                    <i class="ph ph-shield-check"></i>
+                    <span>Safe Testing</span>
+                </div>
+            </div>
+            <div class="footer-section">
+                <h4 class="footer-title">Technology</h4>
+                <div class="footer-item">
+                    <i class="ph ph-code"></i>
+                    <span>Python & Streamlit</span>
+                </div>
+                <div class="footer-item">
+                    <i class="ph ph-brain"></i>
+                    <span>NLTK VADER</span>
+                </div>
+                <div class="footer-item">
+                    <i class="ph ph-chart-bar"></i>
+                    <span>TradingView Charts</span>
+                </div>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <div class="footer-copyright">
+                <p>&copy; 2024 TradingView Pro. Professional Chart Analysis Platform.</p>
+            </div>
+            <div class="footer-links">
+                <a href="#" class="footer-link">
+                    <i class="ph ph-github-logo"></i>
+                </a>
+                <a href="#" class="footer-link">
+                    <i class="ph ph-linkedin-logo"></i>
+                </a>
+                <a href="#" class="footer-link">
+                    <i class="ph ph-envelope"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+"""
+st.markdown(professional_footer, unsafe_allow_html=True)
+
+# Professional CSS (same as Plotly version)
+professional_css = """
+<style>
+/* Professional Design System */
+:root {
+    --bg-primary: #0a0e1a;
+    --bg-secondary: #151b2e;
+    --bg-tertiary: #1e2538;
+    --accent-primary: #6366f1;
+    --accent-secondary: #8b5cf6;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --border: #2d3548;
+    --glass-bg: rgba(30, 37, 56, 0.8);
+    --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+/* Global Styles */
+* {
+    box-sizing: border-box;
+}
+
+body, .stApp {
+    background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+}
+
+/* Professional Header */
+.professional-header {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--glass-border);
+    padding: 1rem 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.header-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo-section {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.logo-icon {
+    width: 40px;
+    height: 40px;
+    color: var(--accent-primary);
+    filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.3));
+}
+
+.brand-title {
+    font-family: 'Manrope', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.brand-subtitle {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin: 0;
+    font-weight: 400;
+}
+
+.status-indicators {
+    display: flex;
+    gap: 2rem;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.status-item i {
+    color: var(--accent-primary);
+    font-size: 1.1rem;
+}
+
+/* Enhanced Input Section */
+.input-section {
+    margin: 2rem 0;
+    padding: 0 2rem;
+}
+
+.input-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 2rem;
+    align-items: end;
+}
+
+.input-wrapper {
+    position: relative;
+}
+
+.input-icon {
+    position: absolute;
+    left: 1rem;
+    top: 2.5rem;
+    color: var(--text-secondary);
+    z-index: 2;
+}
+
+.input-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Enhanced Streamlit Input Styling */
+.stTextInput > div > div > input {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: 12px !important;
+    color: var(--text-primary) !important;
+    font-size: 1rem !important;
+    font-family: 'Inter', sans-serif !important;
+    backdrop-filter: blur(10px) !important;
+    transition: all 0.3s ease !important;
+    padding: 1rem !important;
+}
+
+.stTextInput > div > div > input:focus {
+    outline: none !important;
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+    background: rgba(30, 37, 56, 0.9) !important;
+}
+
+.stSelectbox > div > div > select {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: 12px !important;
+    color: var(--text-primary) !important;
+    font-size: 1rem !important;
+    font-family: 'Inter', sans-serif !important;
+    backdrop-filter: blur(10px) !important;
+    transition: all 0.3s ease !important;
+    padding: 1rem !important;
+}
+
+.stSelectbox > div > div > select:focus {
+    outline: none !important;
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+}
+
+.stTextInput label,
+.stSelectbox label {
+    color: var(--text-secondary) !important;
+    font-size: 0.875rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+}
+
+/* Popular Tickers Dropdown Styling */
+.stSelectbox[data-testid="ticker_dropdown"] > div > div > select {
+    background: var(--accent-primary) !important;
+    border: 1px solid var(--accent-primary) !important;
+    border-radius: 8px !important;
+    color: white !important;
+    font-size: 0.875rem !important;
+    font-weight: 600 !important;
+    padding: 0.75rem !important;
+    transition: all 0.3s ease !important;
+}
+
+.stSelectbox[data-testid="ticker_dropdown"] > div > div > select:hover {
+    background: var(--accent-secondary) !important;
+    border-color: var(--accent-secondary) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+}
+
+.stSelectbox[data-testid="ticker_dropdown"] label {
+    color: var(--accent-primary) !important;
+    font-size: 0.75rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.1em !important;
+}
+
+/* Chart Containers */
+.charts-section {
+    margin: 2rem 0;
+    padding: 0 2rem;
+}
+
+.charts-header {
+    max-width: 1400px;
+    margin: 0 auto 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.charts-title {
+    font-family: 'Manrope', sans-serif;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+}
+
+.chart-controls {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.chart-control-btn {
+    padding: 0.5rem 1rem;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.chart-control-btn:hover,
+.chart-control-btn.active {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+.chart-container {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    overflow: hidden;
+    margin-bottom: 2rem;
+}
+
+.chart-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--glass-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chart-title {
+    font-family: 'Manrope', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+}
+
+.chart-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.chart-action-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.chart-action-btn:hover {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+.chart-content {
+    padding: 1rem;
+}
+
+/* Data Table Section */
+.data-table-section {
+    margin: 2rem 0;
+    padding: 0 2rem;
+}
+
+.table-header {
+    max-width: 1400px;
+    margin: 0 auto 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.table-title {
+    font-family: 'Manrope', sans-serif;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+}
+
+.table-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.table-action-btn {
+    padding: 0.5rem 1rem;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.table-action-btn:hover {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+/* Professional Footer */
+.professional-footer {
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    margin-top: 4rem;
+    padding: 3rem 0 1rem;
+}
+
+.footer-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 2rem;
+}
+
+.footer-content {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 2rem;
+    margin-bottom: 2rem;
+}
+
+.footer-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.footer-title {
+    font-family: 'Manrope', sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.footer-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.footer-item i {
+    color: var(--accent-primary);
+    font-size: 1rem;
+}
+
+.footer-bottom {
+    border-top: 1px solid var(--border);
+    padding-top: 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.footer-copyright {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.footer-links {
+    display: flex;
+    gap: 1rem;
+}
+
+.footer-link {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.footer-link:hover {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+}
+
+/* Enhanced Streamlit Components */
+.stDataFrame {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: 12px !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+.stAlert {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    border-radius: 12px !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+.stButton > button {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)) !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    transition: all 0.3s ease !important;
+}
+
+.stButton > button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 10px 20px rgba(99, 102, 241, 0.3) !important;
+}
+
+/* Hide Streamlit branding */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+.stDeployButton {display: none;}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .header-container {
+        padding: 0 1rem;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .input-container {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .charts-header {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: stretch;
+    }
+    
+    .footer-bottom {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+    }
+}
+</style>
+"""
+st.markdown(professional_css, unsafe_allow_html=True)
