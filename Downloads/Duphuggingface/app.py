@@ -72,7 +72,9 @@ premium_cdn = """
 st.markdown(premium_cdn, unsafe_allow_html=True)
 
 # Database setup
-DB_NAME = 'sentiment_history.db'
+import os
+# Use persistent storage on Hugging Face Spaces, local path otherwise
+DB_NAME = '/data/sentiment_history.db' if os.path.exists('/data') else 'sentiment_history.db'
 CACHE_MINUTES = 15  # Cache data for 15 minutes
 
 def init_database():
