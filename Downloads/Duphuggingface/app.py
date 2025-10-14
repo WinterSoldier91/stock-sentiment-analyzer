@@ -137,6 +137,174 @@ def get_historical_data(ticker, days=30):
     
     return df
 
+# FinViz news fetching functions
+finviz_url = 'https://finviz.com/quote.ashx?t='
+
+def can_fetch_new_data(ticker):
+    """Check if we can fetch new data based on rate limiting"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT last_fetch_time FROM cache_metadata WHERE ticker = ?
+    ''', (ticker,))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result is None:
+        return True, "No cached data - fetching fresh data"
+    
+    last_fetch = datetime.fromisoformat(result[0])
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist)
+    
+    # Remove timezone info for comparison
+    if last_fetch.tzinfo:
+        last_fetch = last_fetch.replace(tzinfo=None)
+    if now.tzinfo:
+        now = now.replace(tzinfo=None)
+    
+    time_diff = now - last_fetch
+    minutes_since_fetch = time_diff.total_seconds() / 60
+    
+    if minutes_since_fetch < CACHE_MINUTES:
+        remaining = CACHE_MINUTES - int(minutes_since_fetch)
+        return False, f"Using cached data (fetched {int(minutes_since_fetch)} min ago, next refresh in {remaining} min)"
+    
+    return True, "Fetching fresh data"
+
+def update_cache_metadata(ticker, article_count):
+    """Update cache metadata after fetching"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.now(ist).isoformat()
+    
+    cursor.execute('''
+        INSERT OR REPLACE INTO cache_metadata (ticker, last_fetch_time, article_count)
+        VALUES (?, ?, ?)
+    ''', (ticker, now, article_count))
+    
+    conn.commit()
+    conn.close()
+
+def get_news(ticker):
+    url = finviz_url + ticker
+    req = Request(url=url,headers={'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:20.0) Gecko/20100101 Firefox/20.0'}) 
+    
+    # Add delay to be respectful to the server
+    time.sleep(random.uniform(1, 3))
+    
+    response = urlopen(req)    
+    html = BeautifulSoup(response, 'html.parser')
+    news_table = html.find(id='news-table')
+    return news_table
+
+def parse_news(news_table):
+    parsed_news = []
+    eastern = pytz.timezone('US/Eastern')
+    today_string = datetime.now(eastern).strftime('%Y-%m-%d')
+    ist = pytz.timezone('Asia/Kolkata')
+    last_date = today_string  # Track last seen date for time-only entries
+    
+    for x in news_table.find_all('tr'):
+        try:
+            text = x.a.get_text() 
+            date_scrape = x.td.text.split()
+            if len(date_scrape) == 1:
+                time = date_scrape[0]
+                date = last_date  # Use last seen date
+            else:
+                date = date_scrape[0]
+                time = date_scrape[1]
+                last_date = date  # Update last seen date
+            parsed_news.append([date, time, text]) 
+        except:
+            pass
+    
+    columns = ['date', 'time', 'headline']
+    parsed_news_df = pd.DataFrame(parsed_news, columns=columns)        
+    parsed_news_df['date'] = parsed_news_df['date'].replace("Today", today_string)
+    parsed_news_df['datetime'] = pd.to_datetime(parsed_news_df['date'] + ' ' + parsed_news_df['time'], format='mixed')
+    
+    eastern = pytz.timezone('US/Eastern')
+    ist = pytz.timezone('Asia/Kolkata')
+    parsed_news_df['datetime'] = parsed_news_df['datetime'].dt.tz_localize(eastern).dt.tz_convert(ist)
+    
+    return parsed_news_df
+
+def score_news(parsed_news_df):
+    vader = SentimentIntensityAnalyzer()
+    scores = parsed_news_df['headline'].apply(vader.polarity_scores).tolist()
+    scores_df = pd.DataFrame(scores)
+    parsed_and_scored_news = parsed_news_df.join(scores_df, rsuffix='_right')        
+    parsed_and_scored_news = parsed_and_scored_news.set_index('datetime')    
+    parsed_and_scored_news = parsed_and_scored_news.drop(columns=['date', 'time'])          
+    parsed_and_scored_news = parsed_and_scored_news.rename(columns={"compound": "sentiment_score"})
+    return parsed_and_scored_news
+
+def store_sentiment_data(ticker, parsed_and_scored_news):
+    """Store sentiment data in database"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    ist = pytz.timezone('Asia/Kolkata')
+    fetched_at = datetime.now(ist).isoformat()
+    
+    for idx, row in parsed_and_scored_news.iterrows():
+        # Check if this article already exists (by ticker and headline only)
+        cursor.execute('''
+            SELECT id, article_datetime FROM sentiment_history 
+            WHERE ticker = ? AND headline = ?
+        ''', (ticker, row['headline']))
+        
+        existing = cursor.fetchone()
+        
+        if existing is None:
+            # New article - insert it
+            cursor.execute('''
+                INSERT INTO sentiment_history 
+                (ticker, headline, sentiment_score, negative, neutral, positive, article_datetime, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                ticker,
+                row['headline'],
+                row['sentiment_score'],
+                row['neg'],
+                row['neu'],
+                row['pos'],
+                idx.isoformat(),
+                fetched_at
+            ))
+        else:
+            # Article exists - update only if new datetime is different
+            existing_id, existing_datetime = existing
+            new_datetime = idx.isoformat()
+            
+            # Update if datetime changed (keeps most recent sentiment scores)
+            if new_datetime != existing_datetime:
+                cursor.execute('''
+                    UPDATE sentiment_history
+                    SET article_datetime = ?, 
+                        sentiment_score = ?,
+                        negative = ?,
+                        neutral = ?,
+                        positive = ?,
+                        fetched_at = ?
+                    WHERE id = ?
+                ''', (
+                    new_datetime,
+                    row['sentiment_score'],
+                    row['neg'],
+                    row['neu'],
+                    row['pos'],
+                    fetched_at,
+                    existing_id
+                ))
+    
+    conn.commit()
+    conn.close()
+
 def create_tradingview_chart_data(data, chart_type):
     """Prepare data for streamlit-lightweight-charts with manual IST offset"""
     
@@ -420,7 +588,34 @@ if ticker:
     try:
         st.subheader(f"📈 TradingView Test for {ticker}")
         
-        # Get historical data
+        # Check if we can fetch new data and fetch if needed
+        can_fetch, message = can_fetch_new_data(ticker)
+        
+        # Show cache status
+        if can_fetch:
+            st.info(f"⚡ {message}")
+        else:
+            st.warning(f"🕐 {message}")
+        
+        # Fetch and store current data if allowed
+        if can_fetch:
+            with st.spinner('Fetching fresh data from FinViz...'):
+                try:
+                    news_table = get_news(ticker)
+                    if news_table:
+                        parsed_news_df = parse_news(news_table)
+                        parsed_and_scored_news = score_news(parsed_news_df)
+                        
+                        # Store in database
+                        store_sentiment_data(ticker, parsed_and_scored_news)
+                        update_cache_metadata(ticker, len(parsed_and_scored_news))
+                        st.success(f"✅ Fetched and stored {len(parsed_and_scored_news)} articles")
+                    else:
+                        st.warning("⚠️ No news found for this ticker")
+                except Exception as e:
+                    st.error(f"❌ Error fetching news: {str(e)}")
+        
+        # Get historical data (including newly fetched data)
         days = 7 if '7' in view_mode else 30
         historical_df = get_historical_data(ticker, days=days)
         
