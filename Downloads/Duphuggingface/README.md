@@ -7,7 +7,6 @@ sdk: streamlit
 sdk_version: 1.50.0
 app_file: app.py
 pinned: false
-license: mit
 ---
 
 # 📊 Stock Sentiment Analyzer
