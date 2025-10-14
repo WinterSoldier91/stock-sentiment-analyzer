@@ -3,11 +3,11 @@ from streamlit_lightweight_charts import renderLightweightCharts
 from urllib.request import urlopen, Request
 from bs4 import BeautifulSoup
 import pandas as pd
-import sqlite3
 import time
 import random
 from datetime import datetime, timedelta
 import pytz
+from database import *
 
 # NLTK VADER for sentiment analysis
 import nltk
@@ -18,450 +18,54 @@ except AttributeError:
     pass
 else:
     ssl._create_default_https_context = _create_unverified_https_context
-nltk.download('vader_lexicon', quiet=True)
+
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
-st.set_page_config(
-    page_title="TradingView Test - Stock Sentiment Analyzer", 
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# Cache NLTK download and VADER analyzer
+@st.cache_resource
+def setup_nltk():
+    """Download NLTK data once and return analyzer"""
+    nltk.download('vader_lexicon', quiet=True)
+    return SentimentIntensityAnalyzer()
 
-# Inject premium CDN resources
-premium_cdn = """
-<!-- Premium Typography -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+@st.cache_resource
+def get_vader_analyzer():
+    """Get cached VADER sentiment analyzer"""
+    return setup_nltk()
 
-<!-- Premium Icons -->
-<script src="https://unpkg.com/@phosphor-icons/web"></script>
-
-<!-- Tailwind CSS for utility classes -->
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    darkMode: 'class',
-    theme: {
-      extend: {
-        colors: {
-          'bg-primary': '#0a0e1a',
-          'bg-secondary': '#151b2e',
-          'bg-tertiary': '#1e2538',
-          'accent-primary': '#6366f1',
-          'accent-secondary': '#8b5cf6',
-          'success': '#10b981',
-          'warning': '#f59e0b',
-          'danger': '#ef4444',
-          'text-primary': '#f8fafc',
-          'text-secondary': '#94a3b8',
-          'border': '#2d3548'
-        },
-        fontFamily: {
-          'inter': ['Inter', 'sans-serif'],
-          'mono': ['JetBrains Mono', 'monospace'],
-          'manrope': ['Manrope', 'sans-serif']
-        }
-      }
+@st.cache_resource
+def get_timezone_objects():
+    """Get cached timezone objects"""
+    return {
+        'eastern': pytz.timezone('US/Eastern'),
+        'ist': pytz.timezone('Asia/Kolkata'),
+        'utc': pytz.utc
     }
-  }
-</script>
+
+# Cache static HTML/CSS content for performance
+@st.cache_data
+def get_minimal_cdn():
+    """Get minimal CDN resources without external dependencies"""
+    return """
+<!-- Minimal styling without external CDN dependencies -->
+<style>
+/* Use system fonts instead of Google Fonts */
+body, .stApp {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Basic icon fallbacks */
+.ph::before {
+    content: "●";
+    font-size: 1.2em;
+}
+</style>
 """
-st.markdown(premium_cdn, unsafe_allow_html=True)
 
-# Database setup
-import os
-# Use persistent storage on Hugging Face Spaces, local path otherwise
-DB_NAME = '/data/sentiment_history.db' if os.path.exists('/data') else 'sentiment_history.db'
-CACHE_MINUTES = 15  # Cache data for 15 minutes
-
-def init_database():
-    """Initialize SQLite database for historical data storage"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    # Create sentiment history table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sentiment_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker TEXT NOT NULL,
-            headline TEXT NOT NULL,
-            sentiment_score REAL NOT NULL,
-            negative REAL,
-            neutral REAL,
-            positive REAL,
-            article_datetime TEXT NOT NULL,
-            fetched_at TEXT NOT NULL,
-            source_date TEXT
-        )
-    ''')
-    
-    # Create cache metadata table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cache_metadata (
-            ticker TEXT PRIMARY KEY,
-            last_fetch_time TEXT NOT NULL,
-            article_count INTEGER NOT NULL
-        )
-    ''')
-    
-    # Create index for faster queries
-    cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_ticker_datetime 
-        ON sentiment_history(ticker, article_datetime)
-    ''')
-    
-    conn.commit()
-    conn.close()
-
-def get_historical_data(ticker, days=30):
-    """Retrieve historical data from database"""
-    conn = sqlite3.connect(DB_NAME)
-    
-    ist = pytz.timezone('Asia/Kolkata')
-    cutoff_date = (datetime.now(ist) - timedelta(days=days)).isoformat()
-    
-    query = '''
-        SELECT article_datetime, sentiment_score, headline, negative, neutral, positive
-        FROM sentiment_history
-        WHERE ticker = ? AND article_datetime >= ?
-        ORDER BY article_datetime DESC
-    '''
-    
-    df = pd.read_sql_query(query, conn, params=(ticker, cutoff_date))
-    conn.close()
-    
-    if len(df) > 0:
-        df['article_datetime'] = pd.to_datetime(df['article_datetime'])
-        df = df.set_index('article_datetime')
-    
-    return df
-
-# FinViz news fetching functions
-finviz_url = 'https://finviz.com/quote.ashx?t='
-
-def can_fetch_new_data(ticker):
-    """Check if we can fetch new data based on rate limiting"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT last_fetch_time FROM cache_metadata WHERE ticker = ?
-    ''', (ticker,))
-    
-    result = cursor.fetchone()
-    conn.close()
-    
-    if result is None:
-        return True, "No cached data - fetching fresh data"
-    
-    last_fetch = datetime.fromisoformat(result[0])
-    ist = pytz.timezone('Asia/Kolkata')
-    now = datetime.now(ist)
-    
-    # Remove timezone info for comparison
-    if last_fetch.tzinfo:
-        last_fetch = last_fetch.replace(tzinfo=None)
-    if now.tzinfo:
-        now = now.replace(tzinfo=None)
-    
-    time_diff = now - last_fetch
-    minutes_since_fetch = time_diff.total_seconds() / 60
-    
-    if minutes_since_fetch < CACHE_MINUTES:
-        remaining = CACHE_MINUTES - int(minutes_since_fetch)
-        return False, f"Using cached data (fetched {int(minutes_since_fetch)} min ago, next refresh in {remaining} min)"
-    
-    return True, "Fetching fresh data"
-
-def update_cache_metadata(ticker, article_count):
-    """Update cache metadata after fetching"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    ist = pytz.timezone('Asia/Kolkata')
-    now = datetime.now(ist).isoformat()
-    
-    cursor.execute('''
-        INSERT OR REPLACE INTO cache_metadata (ticker, last_fetch_time, article_count)
-        VALUES (?, ?, ?)
-    ''', (ticker, now, article_count))
-    
-    conn.commit()
-    conn.close()
-
-def get_news(ticker):
-    url = finviz_url + ticker
-    req = Request(url=url,headers={'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:20.0) Gecko/20100101 Firefox/20.0'}) 
-    
-    # Add delay to be respectful to the server
-    time.sleep(random.uniform(1, 3))
-    
-    response = urlopen(req)    
-    html = BeautifulSoup(response, 'html.parser')
-    news_table = html.find(id='news-table')
-    return news_table
-
-def parse_news(news_table):
-    parsed_news = []
-    eastern = pytz.timezone('US/Eastern')
-    today_string = datetime.now(eastern).strftime('%Y-%m-%d')
-    ist = pytz.timezone('Asia/Kolkata')
-    last_date = today_string  # Track last seen date for time-only entries
-    
-    for x in news_table.find_all('tr'):
-        try:
-            text = x.a.get_text() 
-            date_scrape = x.td.text.split()
-            if len(date_scrape) == 1:
-                time = date_scrape[0]
-                date = last_date  # Use last seen date
-            else:
-                date = date_scrape[0]
-                time = date_scrape[1]
-                last_date = date  # Update last seen date
-            parsed_news.append([date, time, text]) 
-        except:
-            pass
-    
-    columns = ['date', 'time', 'headline']
-    parsed_news_df = pd.DataFrame(parsed_news, columns=columns)        
-    parsed_news_df['date'] = parsed_news_df['date'].replace("Today", today_string)
-    parsed_news_df['datetime'] = pd.to_datetime(parsed_news_df['date'] + ' ' + parsed_news_df['time'], format='mixed')
-    
-    eastern = pytz.timezone('US/Eastern')
-    ist = pytz.timezone('Asia/Kolkata')
-    parsed_news_df['datetime'] = parsed_news_df['datetime'].dt.tz_localize(eastern).dt.tz_convert(ist)
-    
-    return parsed_news_df
-
-def score_news(parsed_news_df):
-    vader = SentimentIntensityAnalyzer()
-    scores = parsed_news_df['headline'].apply(vader.polarity_scores).tolist()
-    scores_df = pd.DataFrame(scores)
-    parsed_and_scored_news = parsed_news_df.join(scores_df, rsuffix='_right')        
-    parsed_and_scored_news = parsed_and_scored_news.set_index('datetime')    
-    parsed_and_scored_news = parsed_and_scored_news.drop(columns=['date', 'time'])          
-    parsed_and_scored_news = parsed_and_scored_news.rename(columns={"compound": "sentiment_score"})
-    return parsed_and_scored_news
-
-def store_sentiment_data(ticker, parsed_and_scored_news):
-    """Store sentiment data in database"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    ist = pytz.timezone('Asia/Kolkata')
-    fetched_at = datetime.now(ist).isoformat()
-    
-    for idx, row in parsed_and_scored_news.iterrows():
-        # Check if this article already exists (by ticker and headline only)
-        cursor.execute('''
-            SELECT id, article_datetime FROM sentiment_history 
-            WHERE ticker = ? AND headline = ?
-        ''', (ticker, row['headline']))
-        
-        existing = cursor.fetchone()
-        
-        if existing is None:
-            # New article - insert it
-            cursor.execute('''
-                INSERT INTO sentiment_history 
-                (ticker, headline, sentiment_score, negative, neutral, positive, article_datetime, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                ticker,
-                row['headline'],
-                row['sentiment_score'],
-                row['neg'],
-                row['neu'],
-                row['pos'],
-                idx.isoformat(),
-                fetched_at
-            ))
-        else:
-            # Article exists - update only if new datetime is different
-            existing_id, existing_datetime = existing
-            new_datetime = idx.isoformat()
-            
-            # Update if datetime changed (keeps most recent sentiment scores)
-            if new_datetime != existing_datetime:
-                cursor.execute('''
-                    UPDATE sentiment_history
-                    SET article_datetime = ?, 
-                        sentiment_score = ?,
-                        negative = ?,
-                        neutral = ?,
-                        positive = ?,
-                        fetched_at = ?
-                    WHERE id = ?
-                ''', (
-                    new_datetime,
-                    row['sentiment_score'],
-                    row['neg'],
-                    row['neu'],
-                    row['pos'],
-                    fetched_at,
-                    existing_id
-                ))
-    
-    conn.commit()
-    conn.close()
-
-def create_tradingview_chart_data(data, chart_type):
-    """Prepare data for streamlit-lightweight-charts with manual IST offset"""
-    
-    # Ensure IST timezone awareness
-    ist = pytz.timezone('Asia/Kolkata')
-    utc = pytz.utc
-    
-    # Make the data index timezone-aware if it isn't already
-    if data.index.tz is None:
-        data.index = data.index.tz_localize(ist)
-    elif str(data.index.tz) != 'Asia/Kolkata':
-        data.index = data.index.tz_convert(ist)
-    
-    # Forward-fill gaps (keep in IST for now)
-    if len(data) > 0:
-        freq = 'h' if chart_type == 'hourly' else 'D'
-        complete_range = pd.date_range(
-            start=data.index.min(),
-            end=data.index.max(),
-            freq=freq,
-            tz=ist  # Explicitly set timezone
-        )
-        filled_data = data.reindex(complete_range)
-        filled_data['sentiment_score'] = filled_data['sentiment_score'].ffill()
-        filled_data = filled_data.dropna()
-    else:
-        filled_data = data
-    
-    # Convert to TradingView format with manual IST offset
-    chart_data = []
-    IST_OFFSET_SECONDS = 19800  # 5 hours 30 minutes in seconds
-    
-    for timestamp, row in filled_data.iterrows():
-        if chart_type == 'hourly':
-            # Convert IST to UTC, then add IST offset to display in IST
-            timestamp_utc = timestamp.astimezone(utc)
-            # Add IST offset so chart displays IST time correctly
-            time_value = int(timestamp_utc.timestamp()) + IST_OFFSET_SECONDS
-        else:
-            # Daily: Use date string (no timezone needed)
-            time_value = timestamp.strftime('%Y-%m-%d')
-        
-        chart_data.append({
-            "time": time_value,
-            "value": float(row['sentiment_score'])
-        })
-    
-    return chart_data
-
-def plot_hourly_sentiment(data, ticker, title_suffix=""):
-    """Create hourly chart using streamlit-lightweight-charts"""
-    mean_scores = data.resample('h').mean(numeric_only=True)
-    
-    if len(mean_scores) == 0:
-        st.warning("No hourly data available")
-        return
-    
-    chart_data = create_tradingview_chart_data(mean_scores, 'hourly')
-    
-    # Use streamlit-lightweight-charts package
-    chart_options = [{
-        "chart": {
-            "height": 400,
-            "layout": {
-                "background": {"color": "#0e1117"},
-                "textColor": "#fafafa"
-            },
-            "grid": {
-                "vertLines": {"color": "#262730"},
-                "horzLines": {"color": "#262730"}
-            },
-            "crosshair": {
-                "mode": 0  # Normal mode
-            },
-            "timeScale": {
-                "timeVisible": True,
-                "secondsVisible": False,
-                "hoursVisible": True,
-                "minutesVisible": True,
-                "borderVisible": True
-            }
-        },
-        "series": [{
-            "type": "Histogram",
-            "data": chart_data,
-            "options": {
-                "color": "#00d4ff",
-                "priceFormat": {
-                    "type": "price",
-                    "precision": 3,
-                    "minMove": 0.001
-                }
-            }
-        }]
-    }]
-    
-    renderLightweightCharts(chart_options, key=f"hourly_{ticker}")
-
-def plot_daily_sentiment(data, ticker, title_suffix=""):
-    """Create daily chart using streamlit-lightweight-charts"""
-    mean_scores = data.resample('d').mean(numeric_only=True)
-    
-    if len(mean_scores) == 0:
-        st.warning("No daily data available")
-        return
-    
-    chart_data = create_tradingview_chart_data(mean_scores, 'daily')
-    
-    # Use streamlit-lightweight-charts package
-    chart_options = [{
-        "chart": {
-            "height": 400,
-            "layout": {
-                "background": {"color": "#0e1117"},
-                "textColor": "#fafafa"
-            },
-            "grid": {
-                "vertLines": {"color": "#262730"},
-                "horzLines": {"color": "#262730"}
-            },
-            "crosshair": {
-                "mode": 0  # Normal mode
-            },
-            "timeScale": {
-                "timeVisible": True,
-                "secondsVisible": False,
-                "hoursVisible": True,
-                "minutesVisible": True,
-                "borderVisible": True
-            }
-        },
-        "series": [{
-            "type": "Histogram",
-            "data": chart_data,
-            "options": {
-                "color": "#00d4ff",
-                "priceFormat": {
-                    "type": "price",
-                    "precision": 3,
-                    "minMove": 0.001
-                }
-            }
-        }]
-    }]
-    
-    renderLightweightCharts(chart_options, key=f"daily_{ticker}")
-
-# Initialize database
-init_database()
-
-# Import future article fixer
-from future_article_fixer import check_future_articles, fix_future_articles, ignore_future_article
-
-# Professional Header with Navigation
-professional_header = """
+@st.cache_data
+def get_professional_header():
+    """Get cached professional header HTML"""
+    return """
 <div class="professional-header">
     <div class="header-container">
         <div class="header-left">
@@ -494,292 +98,11 @@ professional_header = """
     </div>
 </div>
 """
-st.markdown(professional_header, unsafe_allow_html=True)
 
-# Check for future-dated articles and show fix option
-future_summary, future_count, future_articles_detail = check_future_articles()
-if future_count > 0:
-    st.warning(f"⚠️ **Future-Dated Articles Detected**")
-    st.text(future_summary)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("🔧 Fix Future-Dated Articles", type="primary"):
-            with st.spinner("Fixing future-dated articles by fetching correct timestamps from FinViz..."):
-                result = fix_future_articles()
-                
-            if result['fixed'] > 0:
-                st.success(f"✅ **Fixed {result['fixed']} articles!**")
-            if result['not_found'] > 0:
-                st.warning(f"⚠️ **{result['not_found']} articles not found on FinViz**")
-                st.info("These articles may have been removed from FinViz. You can ignore them individually below.")
-            if result['errors'] > 0:
-                st.error(f"❌ {result['errors']} tickers had errors during processing")
-            
-            st.info("🔄 **Please refresh the page to see updated data**")
-            st.stop()
-    
-    # Show individual articles with ignore option
-    if future_count > 0:
-        st.subheader("📋 Individual Articles")
-        for ticker, article_id, headline, article_dt in future_articles_detail:
-            col_a, col_b = st.columns([4, 1])
-            with col_a:
-                st.text(f"{ticker}: {headline[:80]}...")
-                st.caption(f"Timestamp: {article_dt}")
-            with col_b:
-                if st.button(f"🗑️ Ignore", key=f"ignore_{article_id}"):
-                    ignore_future_article(article_id)
-                    st.success(f"✅ **Article deleted** - Warning will no longer appear")
-                    st.info("🔄 **Please refresh the page**")
-                    st.stop()
-
-st.info("🔬 **Testing Environment**: This is a local test version with TradingView Lightweight Charts. The main app uses Plotly and is safe.")
-
-# Enhanced Input Section (Streamlit-only, no duplicates)
-input_section = """
-<div class="input-section">
-    <div class="input-container">
-        <div class="input-wrapper">
-            <div class="input-icon">
-                <i class="ph ph-magnifying-glass"></i>
-            </div>
-            <div class="input-content">
-                <label class="input-label">Enter Stock Ticker</label>
-            </div>
-        </div>
-        <div class="view-selector-wrapper">
-            <label class="input-label">View Mode</label>
-        </div>
-    </div>
-</div>
-"""
-st.markdown(input_section, unsafe_allow_html=True)
-
-# Create columns for the actual Streamlit inputs (styled but functional)
-col1, col2 = st.columns([3, 1])
-with col1:
-    # Popular ticker options
-    popular_tickers = ['BTC', 'ETH', 'SOL', 'AMZN', 'GOOGL', 'TSLA', 'MSTR', 'AAPL']
-    
-    # Create a custom input with dropdown suggestions
-    ticker_input_container = st.container()
-    with ticker_input_container:
-        col_input, col_dropdown = st.columns([2, 1])
-        
-        with col_input:
-            ticker = st.text_input('Enter Stock Ticker', '', key='ticker_input', placeholder='e.g., BTC, AAPL, TSLA').upper()
-        
-        with col_dropdown:
-            selected_ticker = st.selectbox(
-                'Popular Tickers',
-                ['Select...'] + popular_tickers,
-                key='ticker_dropdown',
-                help='Choose from popular tickers'
-            )
-            
-            # If user selects from dropdown, update the text input
-            if selected_ticker != 'Select...':
-                ticker = selected_ticker
-
-with col2:
-    view_mode = st.selectbox('View', [
-        'Historical (7 days)', 
-        'Historical (30 days)', 
-        'Historical (60 days)', 
-        'Historical (90 days)', 
-        'Historical (6 months)', 
-        'Historical (1 year)'
-    ], index=1, key='view_selector')
-
-if ticker:
-    try:
-        st.subheader(f"📈 TradingView Test for {ticker}")
-        
-        # Check if we can fetch new data and fetch if needed
-        can_fetch, message = can_fetch_new_data(ticker)
-        
-        # Show cache status
-        if can_fetch:
-            st.info(f"⚡ {message}")
-        else:
-            st.warning(f"🕐 {message}")
-        
-        # Fetch and store current data if allowed
-        if can_fetch:
-            with st.spinner('Fetching fresh data from FinViz...'):
-                try:
-                    news_table = get_news(ticker)
-                    if news_table:
-                        parsed_news_df = parse_news(news_table)
-                        parsed_and_scored_news = score_news(parsed_news_df)
-                        
-                        # Store in database
-                        store_sentiment_data(ticker, parsed_and_scored_news)
-                        update_cache_metadata(ticker, len(parsed_and_scored_news))
-                        st.success(f"✅ Fetched and stored {len(parsed_and_scored_news)} articles")
-                    else:
-                        st.warning("⚠️ No news found for this ticker")
-                except Exception as e:
-                    st.error(f"❌ Error fetching news: {str(e)}")
-        
-        # Get historical data (including newly fetched data)
-        # Parse days from view_mode
-        if '7' in view_mode:
-            days = 7
-        elif '30' in view_mode:
-            days = 30
-        elif '60' in view_mode:
-            days = 60
-        elif '90' in view_mode:
-            days = 90
-        elif '6 months' in view_mode:
-            days = 180  # 6 months ≈ 180 days
-        elif '1 year' in view_mode:
-            days = 365  # 1 year = 365 days
-        else:
-            days = 30  # default fallback
-        
-        historical_df = get_historical_data(ticker, days=days)
-        
-        if len(historical_df) > 0:
-            st.success(f"✅ Found {len(historical_df)} articles in database")
-            
-            # Enhanced Chart Containers
-            chart_section = """
-            <div class="charts-section">
-                <div class="charts-header">
-                    <h3 class="charts-title">
-                        <i class="ph ph-chart-line"></i>
-                        TradingView Professional Charts
-                    </h3>
-                    <div class="chart-controls">
-                        <button class="chart-control-btn active" data-chart="hourly">
-                            <i class="ph ph-clock"></i>
-                            Hourly
-                        </button>
-                        <button class="chart-control-btn" data-chart="daily">
-                            <i class="ph ph-calendar"></i>
-                            Daily
-                        </button>
-                    </div>
-                </div>
-            </div>
-            """
-            st.markdown(chart_section, unsafe_allow_html=True)
-            
-            # Charts with professional wrappers
-            col1, col2 = st.columns(2)
-            with col1:
-                chart_wrapper = """
-                <div class="chart-container">
-                    <div class="chart-header">
-                        <h4 class="chart-title">
-                            <i class="ph ph-clock"></i>
-                            Hourly Sentiment Trend
-                        </h4>
-                        <div class="chart-actions">
-                            <button class="chart-action-btn" title="Export Chart">
-                                <i class="ph ph-download"></i>
-                            </button>
-                            <button class="chart-action-btn" title="Full Screen">
-                                <i class="ph ph-arrows-out"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="chart-content">
-                """
-                st.markdown(chart_wrapper, unsafe_allow_html=True)
-                plot_hourly_sentiment(historical_df, ticker, f" ({days} Days)")
-                st.markdown("</div></div>", unsafe_allow_html=True)
-                
-            with col2:
-                chart_wrapper = """
-                <div class="chart-container">
-                    <div class="chart-header">
-                        <h4 class="chart-title">
-                            <i class="ph ph-calendar"></i>
-                            Daily Sentiment Trend
-                        </h4>
-                        <div class="chart-actions">
-                            <button class="chart-action-btn" title="Export Chart">
-                                <i class="ph ph-download"></i>
-                            </button>
-                            <button class="chart-action-btn" title="Full Screen">
-                                <i class="ph ph-arrows-out"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="chart-content">
-                """
-                st.markdown(chart_wrapper, unsafe_allow_html=True)
-                plot_daily_sentiment(historical_df, ticker, f" ({days} Days)")
-                st.markdown("</div></div>", unsafe_allow_html=True)
-            
-            # Enhanced Data Table
-            table_section = """
-            <div class="data-table-section">
-                <div class="table-header">
-                    <h3 class="table-title">
-                        <i class="ph ph-table"></i>
-                        Sample Data
-                    </h3>
-                    <div class="table-actions">
-                        <button class="table-action-btn" title="Export CSV">
-                            <i class="ph ph-download"></i>
-                            Export
-                        </button>
-                        <button class="table-action-btn" title="Refresh Data">
-                            <i class="ph ph-arrow-clockwise"></i>
-                            Refresh
-                        </button>
-                    </div>
-                </div>
-            </div>
-            """
-            st.markdown(table_section, unsafe_allow_html=True)
-            
-            # Display the table with custom styling
-            st.dataframe(
-                historical_df[['headline', 'sentiment_score']].head(10),
-                column_config={
-                    "headline": st.column_config.TextColumn(
-                        "Headline",
-                        width="large",
-                    ),
-                    "sentiment_score": st.column_config.NumberColumn(
-                        "Sentiment Score",
-                        format="%.3f",
-                    ),
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-        else:
-            st.warning(f"No historical data available for {ticker}. Try running the main app first to collect data.")
-    
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-
-else:
-    st.info("👆 Enter a stock ticker above to test TradingView charts")
-    st.write("""
-    ### Testing Features:
-    - **TradingView Lightweight Charts**: Professional charting library
-    - **Forward-fill gaps**: Continuous data for crosshair functionality
-    - **Crosshair everywhere**: Shows sentiment values at any cursor position
-    - **Dark theme**: Matches your app's styling
-    
-    ### How to test:
-    1. Enter a stock ticker (e.g., "BTC")
-    2. Charts will render using TradingView Lightweight Charts
-    3. Move cursor anywhere on chart - crosshair should show values
-    4. Compare with main app's Plotly charts
-    """)
-
-# Professional Footer
-professional_footer = f"""
+@st.cache_data
+def get_professional_footer():
+    """Get cached professional footer HTML"""
+    return f"""
 <div class="professional-footer">
     <div class="footer-container">
         <div class="footer-content">
@@ -848,10 +171,11 @@ professional_footer = f"""
     </div>
 </div>
 """
-st.markdown(professional_footer, unsafe_allow_html=True)
 
-# Professional CSS (same as Plotly version)
-professional_css = """
+@st.cache_data
+def get_professional_css():
+    """Get cached professional CSS"""
+    return """
 <style>
 /* Professional Design System */
 :root {
@@ -1372,4 +696,565 @@ footer {visibility: hidden;}
 }
 </style>
 """
-st.markdown(professional_css, unsafe_allow_html=True)
+
+st.set_page_config(
+    page_title="TradingView Test - Stock Sentiment Analyzer", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Load cached static content - using minimal CDN for faster loads
+st.markdown(get_minimal_cdn(), unsafe_allow_html=True)
+
+# Database setup
+CACHE_MINUTES = 15  # Cache data for 15 minutes
+
+# FinViz news fetching functions
+finviz_url = 'https://finviz.com/quote.ashx?t='
+
+def get_news(ticker):
+    url = finviz_url + ticker
+    req = Request(url=url,headers={'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:20.0) Gecko/20100101 Firefox/20.0'}) 
+    
+    # Minimal delay for better performance (was 1-3 seconds)
+    time.sleep(0.1)  # Minimal 0.1s delay for rate limiting
+    
+    try:
+        response = urlopen(req, timeout=15)  # Add 15 second timeout
+        html = BeautifulSoup(response, 'html.parser')
+        news_table = html.find(id='news-table')
+        return news_table
+    except Exception as e:
+        print(f"Error fetching news from FinViz: {e}")
+        return None
+
+def parse_news(news_table):
+    parsed_news = []
+    timezones = get_timezone_objects()
+    eastern = timezones['eastern']
+    ist = timezones['ist']
+    today_string = datetime.now(eastern).strftime('%Y-%m-%d')
+    last_date = today_string  # Track last seen date for time-only entries
+    
+    for x in news_table.find_all('tr'):
+        try:
+            text = x.a.get_text() 
+            date_scrape = x.td.text.split()
+            if len(date_scrape) == 1:
+                time = date_scrape[0]
+                date = last_date  # Use last seen date
+            else:
+                date = date_scrape[0]
+                time = date_scrape[1]
+                last_date = date  # Update last seen date
+            parsed_news.append([date, time, text]) 
+        except:
+            pass
+    
+    columns = ['date', 'time', 'headline']
+    parsed_news_df = pd.DataFrame(parsed_news, columns=columns)        
+    parsed_news_df['date'] = parsed_news_df['date'].replace("Today", today_string)
+    parsed_news_df['datetime'] = pd.to_datetime(parsed_news_df['date'] + ' ' + parsed_news_df['time'], format='mixed')
+    
+    parsed_news_df['datetime'] = parsed_news_df['datetime'].dt.tz_localize(eastern).dt.tz_convert(ist)
+    
+    return parsed_news_df
+
+def score_news(parsed_news_df):
+    vader = get_vader_analyzer()
+    scores = parsed_news_df['headline'].apply(vader.polarity_scores).tolist()
+    scores_df = pd.DataFrame(scores)
+    parsed_and_scored_news = parsed_news_df.join(scores_df, rsuffix='_right')        
+    parsed_and_scored_news = parsed_and_scored_news.set_index('datetime')    
+    parsed_and_scored_news = parsed_and_scored_news.drop(columns=['date', 'time'])          
+    parsed_and_scored_news = parsed_and_scored_news.rename(columns={"compound": "sentiment_score"})
+    return parsed_and_scored_news
+
+# Future article fixer integration
+from future_article_fixer import check_future_articles, fix_future_articles, ignore_future_article
+
+def create_tradingview_chart_data(data, chart_type):
+    """Prepare data for streamlit-lightweight-charts with manual IST offset"""
+    
+    # Ensure IST timezone awareness
+    ist = pytz.timezone('Asia/Kolkata')
+    utc = pytz.utc
+    
+    # Make the data index timezone-aware if it isn't already
+    if data.index.tz is None:
+        data.index = data.index.tz_localize(ist)
+    elif str(data.index.tz) != 'Asia/Kolkata':
+        data.index = data.index.tz_convert(ist)
+    
+    # Forward-fill gaps (keep in IST for now)
+    if len(data) > 0:
+        freq = 'h' if chart_type == 'hourly' else 'D'
+        complete_range = pd.date_range(
+            start=data.index.min(),
+            end=data.index.max(),
+            freq=freq,
+            tz=ist  # Explicitly set timezone
+        )
+        filled_data = data.reindex(complete_range)
+        filled_data['sentiment_score'] = filled_data['sentiment_score'].ffill()
+        filled_data = filled_data.dropna()
+    else:
+        filled_data = data
+    
+    # Convert to TradingView format with manual IST offset
+    chart_data = []
+    IST_OFFSET_SECONDS = 19800  # 5 hours 30 minutes in seconds
+    
+    for timestamp, row in filled_data.iterrows():
+        if chart_type == 'hourly':
+            # Convert IST to UTC, then add IST offset to display in IST
+            timestamp_utc = timestamp.astimezone(utc)
+            # Add IST offset so chart displays IST time correctly
+            time_value = int(timestamp_utc.timestamp()) + IST_OFFSET_SECONDS
+        else:
+            # Daily: Use date string (no timezone needed)
+            time_value = timestamp.strftime('%Y-%m-%d')
+        
+        chart_data.append({
+            "time": time_value,
+            "value": float(row['sentiment_score'])
+        })
+    
+    return chart_data
+
+def plot_hourly_sentiment(data, ticker, title_suffix=""):
+    """Create hourly chart using streamlit-lightweight-charts"""
+    mean_scores = data.resample('h').mean(numeric_only=True)
+    
+    if len(mean_scores) == 0:
+        st.warning("No hourly data available")
+        return
+    
+    chart_data = create_tradingview_chart_data(mean_scores, 'hourly')
+    
+    # Use streamlit-lightweight-charts package
+    chart_options = [{
+        "chart": {
+            "height": 400,
+            "layout": {
+                "background": {"color": "#0e1117"},
+                "textColor": "#fafafa"
+            },
+            "grid": {
+                "vertLines": {"color": "#262730"},
+                "horzLines": {"color": "#262730"}
+            },
+            "crosshair": {
+                "mode": 0  # Normal mode
+            },
+            "timeScale": {
+                "timeVisible": True,
+                "secondsVisible": False,
+                "hoursVisible": True,
+                "minutesVisible": True,
+                "borderVisible": True
+            }
+        },
+        "series": [{
+            "type": "Histogram",
+            "data": chart_data,
+            "options": {
+                "color": "#00d4ff",
+                "priceFormat": {
+                    "type": "price",
+                    "precision": 3,
+                    "minMove": 0.001
+                }
+            }
+        }]
+    }]
+    
+    renderLightweightCharts(chart_options, key=f"hourly_{ticker}")
+
+def plot_daily_sentiment(data, ticker, title_suffix=""):
+    """Create daily chart using streamlit-lightweight-charts"""
+    mean_scores = data.resample('d').mean(numeric_only=True)
+    
+    if len(mean_scores) == 0:
+        st.warning("No daily data available")
+        return
+    
+    chart_data = create_tradingview_chart_data(mean_scores, 'daily')
+    
+    # Use streamlit-lightweight-charts package
+    chart_options = [{
+        "chart": {
+            "height": 400,
+            "layout": {
+                "background": {"color": "#0e1117"},
+                "textColor": "#fafafa"
+            },
+            "grid": {
+                "vertLines": {"color": "#262730"},
+                "horzLines": {"color": "#262730"}
+            },
+            "crosshair": {
+                "mode": 0  # Normal mode
+            },
+            "timeScale": {
+                "timeVisible": True,
+                "secondsVisible": False,
+                "hoursVisible": True,
+                "minutesVisible": True,
+                "borderVisible": True
+            }
+        },
+        "series": [{
+            "type": "Histogram",
+            "data": chart_data,
+            "options": {
+                "color": "#00d4ff",
+                "priceFormat": {
+                    "type": "price",
+                    "precision": 3,
+                    "minMove": 0.001
+                }
+            }
+        }]
+    }]
+    
+    renderLightweightCharts(chart_options, key=f"daily_{ticker}")
+
+# Import future article fixer
+from future_article_fixer import check_future_articles, fix_future_articles, ignore_future_article
+
+# Lazy database initialization - only init when actually needed
+def ensure_database_initialized():
+    """Initialize database only when needed to avoid slow page loads"""
+    try:
+        init_database()
+        return True
+    except Exception as e:
+        print(f"Database initialization failed: {e}")
+        return False
+
+# Load cached header
+st.markdown(get_professional_header(), unsafe_allow_html=True)
+
+# Future article check - moved to expandable section for performance
+with st.expander("🔧 Database Maintenance", expanded=False):
+    st.write("Check for and fix future-dated articles")
+    
+    if st.button("🔍 Check for Future-Dated Articles", type="secondary"):
+        with st.spinner("Checking for future-dated articles..."):
+            # Ensure database is initialized before checking future articles
+            ensure_database_initialized()
+            future_summary, future_count, future_articles_detail = check_future_articles()
+        
+        if future_count > 0:
+            st.warning(f"⚠️ **Future-Dated Articles Detected**")
+            st.text(future_summary)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("🔧 Fix Future-Dated Articles", type="primary"):
+                    with st.spinner("Fixing future-dated articles by fetching correct timestamps from FinViz..."):
+                        result = fix_future_articles()
+                        
+                    if result['fixed'] > 0:
+                        st.success(f"✅ **Fixed {result['fixed']} articles!**")
+                    if result['not_found'] > 0:
+                        st.warning(f"⚠️ **{result['not_found']} articles not found on FinViz**")
+                        st.info("These articles may have been removed from FinViz. You can ignore them individually below.")
+                    if result['errors'] > 0:
+                        st.error(f"❌ {result['errors']} tickers had errors during processing")
+                    
+                    st.info("🔄 **Please refresh the page to see updated data**")
+                    st.stop()
+            
+            # Show individual articles with ignore option
+            if future_count > 0:
+                st.subheader("📋 Individual Articles")
+                for ticker, article_id, headline, article_dt in future_articles_detail:
+                    col_a, col_b = st.columns([4, 1])
+                    with col_a:
+                        st.text(f"{ticker}: {headline[:80]}...")
+                        st.caption(f"Timestamp: {article_dt}")
+                    with col_b:
+                        if st.button(f"🗑️ Ignore", key=f"ignore_{article_id}"):
+                            ignore_future_article(article_id)
+                            st.success(f"✅ **Article deleted** - Warning will no longer appear")
+                            st.info("🔄 **Please refresh the page**")
+                            st.stop()
+        else:
+            st.success("✅ No future-dated articles found!")
+
+st.info("🔬 **Testing Environment**: This is a local test version with TradingView Lightweight Charts. The main app uses Plotly and is safe.")
+
+# Enhanced Input Section (Streamlit-only, no duplicates)
+input_section = """
+<div class="input-section">
+    <div class="input-container">
+        <div class="input-wrapper">
+            <div class="input-icon">
+                <i class="ph ph-magnifying-glass"></i>
+            </div>
+            <div class="input-content">
+                <label class="input-label">Enter Stock Ticker</label>
+            </div>
+        </div>
+        <div class="view-selector-wrapper">
+            <label class="input-label">View Mode</label>
+        </div>
+    </div>
+</div>
+"""
+st.markdown(input_section, unsafe_allow_html=True)
+
+# Create columns for the actual Streamlit inputs (styled but functional)
+col1, col2 = st.columns([3, 1])
+with col1:
+    # Popular ticker options
+    popular_tickers = ['BTC', 'ETH', 'SOL', 'AMZN', 'GOOGL', 'TSLA', 'MSTR', 'AAPL']
+    
+    # Create a custom input with dropdown suggestions
+    ticker_input_container = st.container()
+    with ticker_input_container:
+        col_input, col_dropdown = st.columns([2, 1])
+        
+        with col_input:
+            ticker = st.text_input('Enter Stock Ticker', '', key='ticker_input', placeholder='e.g., BTC, AAPL, TSLA').upper()
+        
+        with col_dropdown:
+            selected_ticker = st.selectbox(
+                'Popular Tickers',
+                ['Select...'] + popular_tickers,
+                key='ticker_dropdown',
+                help='Choose from popular tickers'
+            )
+            
+            # If user selects from dropdown, update the text input
+            if selected_ticker != 'Select...':
+                ticker = selected_ticker
+
+with col2:
+    view_mode = st.selectbox('View', [
+        'Historical (7 days)', 
+        'Historical (30 days)', 
+        'Historical (60 days)', 
+        'Historical (90 days)', 
+        'Historical (6 months)', 
+        'Historical (1 year)'
+    ], index=1, key='view_selector')
+
+if ticker:
+    try:
+        st.subheader(f"📈 TradingView Test for {ticker}")
+        
+        # Check if we can fetch new data and fetch if needed
+        # Ensure database is initialized before any database operations
+        ensure_database_initialized()
+        can_fetch, message = can_fetch_new_data(ticker)
+        
+        # Show cache status
+        if can_fetch:
+            st.info(f"⚡ {message}")
+        else:
+            st.warning(f"🕐 {message}")
+        
+        # Fetch and store current data if allowed
+        if can_fetch:
+            with st.status("🔄 Fetching fresh data...", expanded=False) as status:
+                try:
+                    # Step 1: Connect to database
+                    status.update(label="🔗 Connecting to database...", state="running")
+                    
+                    # Step 2: Fetch news from FinViz
+                    status.update(label="📰 Fetching news from FinViz...", state="running")
+                    news_table = get_news(ticker)
+                    
+                    if news_table:
+                        # Step 3: Parse news data
+                        status.update(label="📊 Parsing news data...", state="running")
+                        parsed_news_df = parse_news(news_table)
+                        
+                        # Step 4: Analyze sentiment
+                        status.update(label="🧠 Analyzing sentiment...", state="running")
+                        parsed_and_scored_news = score_news(parsed_news_df)
+                        
+                        # Step 5: Store in database
+                        status.update(label="💾 Storing data in database...", state="running")
+                        store_sentiment_data(ticker, parsed_and_scored_news)
+                        update_cache_metadata(ticker, len(parsed_and_scored_news))
+                        
+                        # Success
+                        status.update(label=f"✅ Successfully fetched and stored {len(parsed_and_scored_news)} articles", state="complete")
+                        st.success(f"✅ Fetched and stored {len(parsed_and_scored_news)} articles")
+                    else:
+                        status.update(label="⚠️ No news found for this ticker", state="error")
+                        st.warning("⚠️ No news found for this ticker")
+                except Exception as e:
+                    status.update(label=f"❌ Error: {str(e)}", state="error")
+                    st.error(f"❌ Error fetching news: {str(e)}")
+        
+        # Get historical data (including newly fetched data)
+        # Parse days from view_mode
+        if '7' in view_mode:
+            days = 7
+        elif '30' in view_mode:
+            days = 30
+        elif '60' in view_mode:
+            days = 60
+        elif '90' in view_mode:
+            days = 90
+        elif '6 months' in view_mode:
+            days = 180  # 6 months ≈ 180 days
+        elif '1 year' in view_mode:
+            days = 365  # 1 year = 365 days
+        else:
+            days = 30  # default fallback
+        
+        # Get historical data (cached, so should be fast)
+        try:
+            historical_df = get_historical_data(ticker, days=days)
+            if len(historical_df) > 0:
+                st.success(f"✅ Retrieved {len(historical_df)} historical articles")
+            else:
+                st.warning("⚠️ No historical data found")
+        except Exception as e:
+            st.error(f"❌ Database connection failed: {str(e)}")
+            st.info("💡 The app will continue with limited functionality. Database may be temporarily unavailable.")
+            historical_df = pd.DataFrame()  # Empty DataFrame to prevent crashes
+        
+        if len(historical_df) > 0:
+            # Enhanced Chart Containers
+            chart_section = """
+            <div class="charts-section">
+                <div class="charts-header">
+                    <h3 class="charts-title">
+                        <i class="ph ph-chart-line"></i>
+                        TradingView Professional Charts
+                    </h3>
+                    <div class="chart-controls">
+                        <button class="chart-control-btn active" data-chart="hourly">
+                            <i class="ph ph-clock"></i>
+                            Hourly
+                        </button>
+                        <button class="chart-control-btn" data-chart="daily">
+                            <i class="ph ph-calendar"></i>
+                            Daily
+                        </button>
+                    </div>
+                </div>
+            </div>
+            """
+            st.markdown(chart_section, unsafe_allow_html=True)
+            
+            # Charts with professional wrappers
+            col1, col2 = st.columns(2)
+            with col1:
+                chart_wrapper = """
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <h4 class="chart-title">
+                            <i class="ph ph-clock"></i>
+                            Hourly Sentiment Trend
+                        </h4>
+                        <div class="chart-actions">
+                            <button class="chart-action-btn" title="Export Chart">
+                                <i class="ph ph-download"></i>
+                            </button>
+                            <button class="chart-action-btn" title="Full Screen">
+                                <i class="ph ph-arrows-out"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-content">
+                """
+                st.markdown(chart_wrapper, unsafe_allow_html=True)
+                plot_hourly_sentiment(historical_df, ticker, f" ({days} Days)")
+                st.markdown("</div></div>", unsafe_allow_html=True)
+                
+            with col2:
+                chart_wrapper = """
+                <div class="chart-container">
+                    <div class="chart-header">
+                        <h4 class="chart-title">
+                            <i class="ph ph-calendar"></i>
+                            Daily Sentiment Trend
+                        </h4>
+                        <div class="chart-actions">
+                            <button class="chart-action-btn" title="Export Chart">
+                                <i class="ph ph-download"></i>
+                            </button>
+                            <button class="chart-action-btn" title="Full Screen">
+                                <i class="ph ph-arrows-out"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chart-content">
+                """
+                st.markdown(chart_wrapper, unsafe_allow_html=True)
+                plot_daily_sentiment(historical_df, ticker, f" ({days} Days)")
+                st.markdown("</div></div>", unsafe_allow_html=True)
+            
+            # Enhanced Data Table
+            table_section = """
+            <div class="data-table-section">
+                <div class="table-header">
+                    <h3 class="table-title">
+                        <i class="ph ph-table"></i>
+                        Sample Data
+                    </h3>
+                    <div class="table-actions">
+                        <button class="table-action-btn" title="Export CSV">
+                            <i class="ph ph-download"></i>
+                            Export
+                        </button>
+                        <button class="table-action-btn" title="Refresh Data">
+                            <i class="ph ph-arrow-clockwise"></i>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>
+            """
+            st.markdown(table_section, unsafe_allow_html=True)
+            
+            # Display the table with custom styling
+            st.dataframe(
+                historical_df[['headline', 'sentiment_score']].head(10),
+                column_config={
+                    "headline": st.column_config.TextColumn(
+                        "Headline",
+                        width="large",
+                    ),
+                    "sentiment_score": st.column_config.NumberColumn(
+                        "Sentiment Score",
+                        format="%.3f",
+                    ),
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+        else:
+            st.warning(f"No historical data available for {ticker}. Try running the main app first to collect data.")
+    
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+
+else:
+    st.info("👆 Enter a stock ticker above to test TradingView charts")
+    st.write("""
+    ### Testing Features:
+    - **TradingView Lightweight Charts**: Professional charting library
+    - **Forward-fill gaps**: Continuous data for crosshair functionality
+    - **Crosshair everywhere**: Shows sentiment values at any cursor position
+    - **Dark theme**: Matches your app's styling
+    
+    ### How to test:
+    1. Enter a stock ticker (e.g., "BTC")
+    2. Charts will render using TradingView Lightweight Charts
+    3. Move cursor anywhere on chart - crosshair should show values
+    4. Compare with main app's Plotly charts
+    """)
+
+# Load cached footer and CSS
+st.markdown(get_professional_footer(), unsafe_allow_html=True)
+st.markdown(get_professional_css(), unsafe_allow_html=True)

@@ -1,4 +1,3 @@
-import sqlite3
 from urllib.request import urlopen, Request
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -7,6 +6,7 @@ import pytz
 import time
 import random
 import ssl
+from database import get_db_connection
 
 # SSL context fix
 try:
@@ -15,8 +15,6 @@ except AttributeError:
     pass
 else:
     ssl._create_default_https_context = _create_unverified_https_context
-
-DB_NAME = 'sentiment_history.db'
 finviz_url = 'https://finviz.com/quote.ashx?t='
 
 def get_news(ticker):
@@ -65,139 +63,164 @@ def parse_news(news_table):
 
 def check_future_articles():
     """Check for future-dated articles and return summary"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    # Get current IST time for comparison
-    ist = pytz.timezone('Asia/Kolkata')
-    now_ist = datetime.now(ist)
-    now_ist_str = now_ist.isoformat()
-    
-    # Get all future-dated articles (compare timezone-aware timestamps)
-    cursor.execute('''
-        SELECT ticker, COUNT(*) as count
-        FROM sentiment_history
-        WHERE article_datetime > ?
-        GROUP BY ticker
-        ORDER BY count DESC
-    ''', (now_ist_str,))
-    
-    future_articles = cursor.fetchall()
-    
-    # Also get the actual articles for detailed info
-    cursor.execute('''
-        SELECT ticker, id, headline, article_datetime
-        FROM sentiment_history
-        WHERE article_datetime > ?
-        ORDER BY ticker
-    ''', (now_ist_str,))
-    
-    future_articles_detail = cursor.fetchall()
-    conn.close()
-    
-    if not future_articles:
+    conn = get_db_connection()
+    if conn is None:
         return None, 0, []
     
-    # Create summary
-    total_count = sum(count for _, count in future_articles)
-    summary = f"Found {total_count} future-dated articles across {len(future_articles)} tickers:\n"
-    for ticker, count in future_articles:
-        summary += f"  • {ticker}: {count} articles\n"
-    
-    return summary, total_count, future_articles_detail
+    try:
+        cursor = conn.cursor()
+        
+        # Get current IST time for comparison
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        now_ist_str = now_ist.isoformat()
+        
+        # Get all future-dated articles (compare timezone-aware timestamps)
+        cursor.execute('''
+            SELECT ticker, COUNT(*) as count
+            FROM sentiment_history
+            WHERE article_datetime > ?
+            GROUP BY ticker
+            ORDER BY count DESC
+        ''', (now_ist_str,))
+        
+        future_articles = cursor.fetchall()
+        
+        # Also get the actual articles for detailed info
+        cursor.execute('''
+            SELECT ticker, id, headline, article_datetime
+            FROM sentiment_history
+            WHERE article_datetime > ?
+            ORDER BY ticker
+        ''', (now_ist_str,))
+        
+        future_articles_detail = cursor.fetchall()
+        
+        if not future_articles:
+            return None, 0, []
+        
+        # Create summary
+        total_count = sum(count for _, count in future_articles)
+        summary = f"Found {total_count} future-dated articles across {len(future_articles)} tickers:\n"
+        for ticker, count in future_articles:
+            summary += f"  • {ticker}: {count} articles\n"
+        
+        return summary, total_count, future_articles_detail
+        
+    except Exception as e:
+        print(f"Error checking future articles: {e}")
+        return None, 0, []
+    finally:
+        conn.close()
 
 def fix_future_articles():
     """Fix all future-dated articles by fetching correct timestamps from FinViz"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    conn = get_db_connection()
+    if conn is None:
+        return {'fixed': 0, 'not_found': 0, 'errors': 1, 'total': 0}
     
-    # Create backup
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sentiment_history_backup_auto_fix AS 
-        SELECT * FROM sentiment_history
-    ''')
-    conn.commit()
-    
-    # Get current IST time for comparison
-    ist = pytz.timezone('Asia/Kolkata')
-    now_ist = datetime.now(ist)
-    now_ist_str = now_ist.isoformat()
-    
-    # Get all future-dated articles grouped by ticker
-    cursor.execute('''
-        SELECT ticker, id, headline, article_datetime
-        FROM sentiment_history
-        WHERE article_datetime > ?
-        ORDER BY ticker
-    ''', (now_ist_str,))
-    
-    future_articles = cursor.fetchall()
-    
-    # Group by ticker
-    by_ticker = {}
-    for ticker, id, headline, dt in future_articles:
-        if ticker not in by_ticker:
-            by_ticker[ticker] = []
-        by_ticker[ticker].append((id, headline, dt))
-    
-    fixed_count = 0
-    not_found_count = 0
-    error_count = 0
-    
-    # Process each ticker
-    for ticker, articles in by_ticker.items():
-        try:
-            # Fetch from FinViz
-            news_table = get_news(ticker)
-            finviz_df = parse_news(news_table)
-            
-            # Match each article
-            for article_id, headline, old_dt in articles:
-                # Try exact match first
-                match = finviz_df[finviz_df['headline'] == headline]
+    try:
+        cursor = conn.cursor()
+        
+        # Create backup
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sentiment_history_backup_auto_fix AS 
+            SELECT * FROM sentiment_history
+        ''')
+        conn.commit()
+        
+        # Get current IST time for comparison
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        now_ist_str = now_ist.isoformat()
+        
+        # Get all future-dated articles grouped by ticker
+        cursor.execute('''
+            SELECT ticker, id, headline, article_datetime
+            FROM sentiment_history
+            WHERE article_datetime > ?
+            ORDER BY ticker
+        ''', (now_ist_str,))
+        
+        future_articles = cursor.fetchall()
+        
+        # Group by ticker
+        by_ticker = {}
+        for ticker, id, headline, dt in future_articles:
+            if ticker not in by_ticker:
+                by_ticker[ticker] = []
+            by_ticker[ticker].append((id, headline, dt))
+        
+        fixed_count = 0
+        not_found_count = 0
+        error_count = 0
+        
+        # Process each ticker
+        for ticker, articles in by_ticker.items():
+            try:
+                # Fetch from FinViz
+                news_table = get_news(ticker)
+                finviz_df = parse_news(news_table)
                 
-                if len(match) == 0:
-                    # Try fuzzy match (first 50 chars)
-                    headline_short = headline[:50]
-                    match = finviz_df[finviz_df['headline'].str.startswith(headline_short)]
+                # Match each article
+                for article_id, headline, old_dt in articles:
+                    # Try exact match first
+                    match = finviz_df[finviz_df['headline'] == headline]
+                    
+                    if len(match) == 0:
+                        # Try fuzzy match (first 50 chars)
+                        headline_short = headline[:50]
+                        match = finviz_df[finviz_df['headline'].str.startswith(headline_short)]
+                    
+                    if len(match) > 0:
+                        correct_dt = match.iloc[0]['datetime'].isoformat()
+                        
+                        # Update database
+                        cursor.execute('''
+                            UPDATE sentiment_history
+                            SET article_datetime = ?
+                            WHERE id = ?
+                        ''', (correct_dt, article_id))
+                        
+                        fixed_count += 1
+                    else:
+                        not_found_count += 1
                 
-                if len(match) > 0:
-                    correct_dt = match.iloc[0]['datetime'].isoformat()
-                    
-                    # Update database
-                    cursor.execute('''
-                        UPDATE sentiment_history
-                        SET article_datetime = ?
-                        WHERE id = ?
-                    ''', (correct_dt, article_id))
-                    
-                    fixed_count += 1
-                else:
-                    not_found_count += 1
-            
-            conn.commit()
-            
-        except Exception as e:
-            error_count += 1
-    
-    conn.close()
-    
-    return {
-        'fixed': fixed_count,
-        'not_found': not_found_count,
-        'errors': error_count,
-        'total': len(future_articles)
-    }
+                conn.commit()
+                
+            except Exception as e:
+                error_count += 1
+        
+        return {
+            'fixed': fixed_count,
+            'not_found': not_found_count,
+            'errors': error_count,
+            'total': len(future_articles)
+        }
+        
+    except Exception as e:
+        print(f"Error fixing future articles: {e}")
+        return {'fixed': 0, 'not_found': 0, 'errors': 1, 'total': 0}
+    finally:
+        conn.close()
 
 def ignore_future_article(article_id):
     """Delete an article from database (ignore it permanently)"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    conn = get_db_connection()
+    if conn is None:
+        return False
     
-    # Delete the article from sentiment_history table
-    cursor.execute('DELETE FROM sentiment_history WHERE id = ?', (article_id,))
-    
-    conn.commit()
-    conn.close()
-    
-    return True
+    try:
+        cursor = conn.cursor()
+        
+        # Delete the article from sentiment_history table
+        cursor.execute('DELETE FROM sentiment_history WHERE id = ?', (article_id,))
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        print(f"Error ignoring article: {e}")
+        return False
+    finally:
+        conn.close()

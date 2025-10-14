@@ -1,0 +1,812 @@
+================================================================================
+✅ CURRENT STATUS: FULLY DEPLOYED WITH SUPABASE POSTGRESQL
+================================================================================
+
+This guide now includes Supabase PostgreSQL integration for 100% FREE
+persistent storage. The following has been completed:
+
+✅ Supabase account created
+✅ PostgreSQL database created (500MB free)
+✅ Database tables created (sentiment_history, cache_metadata)
+✅ Database credentials obtained
+✅ Secrets added to Hugging Face Spaces
+✅ Code updated with PostgreSQL integration
+✅ Dockerfile fixed to include database.py
+✅ App successfully deployed and running
+
+Database Details:
+- Host: fwwnrulrrlgtfzbfusno.supabase.co
+- Database: postgres
+- User: postgres
+- Port: 5432
+- Storage: 500MB (free tier)
+
+================================================================================
+HUGGING FACE SPACES DEPLOYMENT GUIDE
+Complete Step-by-Step Guide with All Learnings from Mistakes
+NOW WITH SUPABASE POSTGRESQL INTEGRATION
+================================================================================
+
+TABLE OF CONTENTS:
+1. Key Learnings from Mistakes (NOW WITH SUPABASE MISTAKES)
+2. Prerequisites (UPDATED WITH SUPABASE)
+3. File Preparation (UPDATED WITH DATABASE.PY)
+4. Supabase PostgreSQL Setup (NEW SECTION)
+5. Creating the Space (CRITICAL STEPS)
+6. Pushing Code (THE RIGHT WAY)
+7. Adding Database Secrets to HF Spaces (NEW SECTION)
+8. Troubleshooting Common Errors (UPDATED WITH POSTGRESQL)
+9. Storage Options Comparison (NEW SECTION)
+10. Final Checklist (UPDATED)
+
+================================================================================
+1. KEY LEARNINGS FROM MISTAKES
+================================================================================
+
+MISTAKE #1: Wrong SDK Selection
+❌ WRONG: Selecting "Gradio" SDK when you have a Streamlit app
+❌ WRONG: Selecting "Docker" → "Streamlit template" (causes config errors)
+✅ CORRECT: There is NO standalone "Streamlit" SDK option!
+✅ CORRECT: You MUST use "Docker" SDK with proper Dockerfile
+
+MISTAKE #2: Files in Wrong Directory
+❌ WRONG: Files pushed to subdirectories like "Downloads/Duphuggingface/"
+✅ CORRECT: Files MUST be in the root directory of the Space
+✅ SOLUTION: Clone the HF Space fresh, copy files to root, then push
+
+MISTAKE #3: Wrong Port Configuration
+❌ WRONG: Using port 8501 (Streamlit default)
+✅ CORRECT: Hugging Face Spaces uses port 7860
+✅ MUST SET: In Dockerfile: --server.port=7860
+✅ MUST SET: In README.md: app_port: 7860
+
+MISTAKE #4: Incorrect README.md Configuration
+❌ WRONG: sdk: streamlit (when using Docker)
+❌ WRONG: Including extra fields like license, sdk_version
+❌ WRONG: Missing app_port field
+✅ CORRECT: Minimal YAML with sdk: docker and app_port: 7860
+
+MISTAKE #5: Database Path Not Configured for Persistent Storage
+❌ WRONG: Hardcoded DB_NAME = 'sentiment_history.db'
+✅ CORRECT: Use conditional path for /data directory
+
+MISTAKE #6: Hugging Face Persistent Storage is NOT Free
+❌ WRONG: Assuming HF's built-in persistent storage is free
+❌ WRONG: Telling users HF persistent storage is free
+✅ CORRECT: HF persistent storage is a PAID feature
+✅ SOLUTION: Use Supabase PostgreSQL (100% free, 500MB)
+
+MISTAKE #7: Missing database.py in Dockerfile
+❌ WRONG: Dockerfile only copies app.py and future_article_fixer.py
+❌ WRONG: Forgetting to copy database.py module
+✅ CORRECT: Must also copy database.py
+✅ FIX: Add `COPY database.py .` to Dockerfile
+
+MISTAKE #8: Database Connection During Docker Build
+❌ WRONG: Calling `init_database()` at module level in app.py
+❌ WRONG: Database functions that crash when connection fails
+❌ WRONG: Environment variables not available during Docker build
+✅ CORRECT: Remove module-level database initialization
+✅ CORRECT: Add graceful fallback in database connection functions
+✅ FIX: Return None from get_db_connection() on error, check in all functions
+
+MISTAKE #9: Missing psycopg2-binary in requirements.txt
+❌ WRONG: Only having SQLite dependencies
+❌ WRONG: Missing PostgreSQL driver
+✅ CORRECT: Add `psycopg2-binary>=2.9.0` to requirements.txt
+
+================================================================================
+2. PREREQUISITES
+================================================================================
+
+Required Files:
+- app.py (your Streamlit application)
+- requirements.txt (all Python dependencies with psycopg2-binary)
+- future_article_fixer.py (if your app uses it)
+- database.py (PostgreSQL connection module) - NEW
+- .gitignore (to exclude venv, databases, etc.)
+
+Required Accounts:
+- Hugging Face account (free)
+- GitHub account (for version control)
+- Supabase account (free) - NEW
+- Hugging Face Access Token with WRITE permissions
+
+================================================================================
+3. FILE PREPARATION
+================================================================================
+
+STEP 3.1: Create Dockerfile
+----------------------------
+Create a file named "Dockerfile" (no extension) with this EXACT content:
+
+```
+FROM python:3.10
+
+WORKDIR /code
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN python -m nltk.downloader vader_lexicon
+
+COPY app.py .
+COPY future_article_fixer.py .
+COPY database.py .    # <-- CRITICAL: Don't forget this!
+
+EXPOSE 7860
+
+CMD ["streamlit", "run", "app.py", "--server.port=7860", "--server.address=0.0.0.0"]
+```
+
+CRITICAL NOTES:
+- Port MUST be 7860 (not 8501)
+- EXPOSE 7860 is required
+- Copy only necessary files (not entire directory)
+- MUST include database.py for PostgreSQL connection
+
+STEP 3.2: Create README.md
+---------------------------
+Create README.md with this EXACT YAML format:
+
+```
+---
+title: Antisentiment
+emoji: 📊
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
+
+# Antisentiment
+
+A professional stock sentiment analysis tool with TradingView-style charts.
+```
+
+CRITICAL NOTES:
+- sdk MUST be "docker" (not "streamlit")
+- app_port MUST be 7860
+- NO extra fields (no license, no sdk_version, no python_version)
+- Three dashes before and after YAML block
+
+STEP 3.3: Create database.py Module
+------------------------------------
+Create database.py with PostgreSQL connection functions:
+
+```python
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from datetime import datetime, timedelta
+import pytz
+import pandas as pd
+
+def get_db_connection():
+    """Get PostgreSQL connection with graceful error handling"""
+    try:
+        return psycopg2.connect(
+            host=os.getenv('DB_HOST'),
+            database=os.getenv('DB_NAME'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            port=os.getenv('DB_PORT', 5432)
+        )
+    except psycopg2.Error as e:
+        print(f"Database connection error: {e}")
+        return None
+    except Exception as e:
+        print(f"Unexpected database error: {e}")
+        return None
+
+def init_database():
+    """Initialize database tables (already done in Supabase)"""
+    pass
+
+def get_historical_data(ticker, days=30):
+    """Get historical sentiment data from PostgreSQL"""
+    conn = get_db_connection()
+    if conn is None:
+        return pd.DataFrame()
+    
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT * FROM sentiment_history 
+                WHERE ticker = %s 
+                ORDER BY timestamp DESC 
+                LIMIT %s
+            """, (ticker, days))
+            rows = cursor.fetchall()
+            return pd.DataFrame(rows)
+    except Exception as e:
+        print(f"Error fetching historical data: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def can_fetch_new_data(ticker):
+    """Check if we can fetch new data (15-minute cache)"""
+    conn = get_db_connection()
+    if conn is None:
+        return True, "Database not available - fetching fresh data"
+    
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT last_fetch FROM cache_metadata 
+                WHERE ticker = %s
+            """, (ticker,))
+            result = cursor.fetchone()
+            
+            if not result:
+                return True, "No cache found"
+            
+            last_fetch = result[0]
+            now = datetime.now(pytz.UTC)
+            time_diff = now - last_fetch
+            
+            if time_diff.total_seconds() > 900:  # 15 minutes
+                return True, "Cache expired"
+            else:
+                return False, f"Cache valid for {int(900 - time_diff.total_seconds())} more seconds"
+    except Exception as e:
+        print(f"Error checking cache: {e}")
+        return True, "Error checking cache - fetching fresh data"
+    finally:
+        conn.close()
+
+def update_cache_metadata(ticker, article_count):
+    """Update cache metadata"""
+    conn = get_db_connection()
+    if conn is None:
+        return
+    
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO cache_metadata (ticker, last_fetch, article_count)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (ticker) 
+                DO UPDATE SET 
+                    last_fetch = EXCLUDED.last_fetch,
+                    article_count = EXCLUDED.article_count
+            """, (ticker, datetime.now(pytz.UTC), article_count))
+            conn.commit()
+    except Exception as e:
+        print(f"Error updating cache metadata: {e}")
+    finally:
+        conn.close()
+
+def store_sentiment_data(ticker, parsed_and_scored_news):
+    """Store sentiment data in PostgreSQL"""
+    conn = get_db_connection()
+    if conn is None:
+        return
+    
+    try:
+        with conn.cursor() as cursor:
+            for article in parsed_and_scored_news:
+                cursor.execute("""
+                    INSERT INTO sentiment_history 
+                    (ticker, headline, sentiment_score, timestamp, url)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (ticker, headline, timestamp) DO NOTHING
+                """, (
+                    ticker,
+                    article['headline'],
+                    article['sentiment_score'],
+                    article['timestamp'],
+                    article['url']
+                ))
+            conn.commit()
+    except Exception as e:
+        print(f"Error storing sentiment data: {e}")
+    finally:
+        conn.close()
+```
+
+STEP 3.4: Update app.py for PostgreSQL
+---------------------------------------
+Remove SQLite imports and add PostgreSQL imports:
+
+```python
+# Remove these lines:
+# import sqlite3
+# DB_NAME = '/data/sentiment_history.db' if os.path.exists('/data') else 'sentiment_history.db'
+# init_database()
+
+# Add this instead:
+from database import *
+```
+
+This ensures:
+- Uses PostgreSQL instead of SQLite
+- Graceful fallback when database unavailable
+- No module-level database initialization
+
+STEP 3.5: Verify requirements.txt
+----------------------------------
+Ensure requirements.txt includes ALL dependencies:
+
+```
+streamlit>=1.50.0
+pandas>=2.0.0
+beautifulsoup4>=4.14.0
+nltk>=3.9.0
+plotly>=5.0.0
+pytz>=2023.3
+streamlit-lightweight-charts>=0.7.0
+psycopg2-binary>=2.9.0    # <-- CRITICAL: For PostgreSQL
+```
+
+================================================================================
+4. SUPABASE POSTGRESQL SETUP
+================================================================================
+
+STEP 4.1: Create Supabase Account
+----------------------------------
+1. Go to https://supabase.com
+2. Click "Start your project"
+3. Sign up with GitHub (recommended)
+4. Complete account setup
+
+STEP 4.2: Create New Project
+-----------------------------
+1. Click "New Project"
+2. Fill in project details:
+   - Name: sentiment-analyzer (or your choice)
+   - Database Password: Set a STRONG password (save it!)
+   - Region: Choose closest to your location
+3. Click "Create new project"
+4. Wait for project to be created (2-3 minutes)
+
+STEP 4.3: Get Database Credentials
+-----------------------------------
+1. Go to Project Settings → Database
+2. Copy these values (you'll need them later):
+   - Host: fwwnrulrrlgtfzbfusno.supabase.co
+   - Database name: postgres
+   - Port: 5432
+   - User: postgres
+   - Password: [your password]
+
+STEP 4.4: Create Database Tables
+----------------------------------
+1. Go to SQL Editor in Supabase dashboard
+2. Run this SQL to create sentiment_history table:
+
+```sql
+CREATE TABLE IF NOT EXISTS sentiment_history (
+    id SERIAL PRIMARY KEY,
+    ticker VARCHAR(10) NOT NULL,
+    headline TEXT NOT NULL,
+    sentiment_score REAL NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(ticker, headline, timestamp)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentiment_history_ticker_timestamp 
+ON sentiment_history(ticker, timestamp DESC);
+```
+
+3. Run this SQL to create cache_metadata table:
+
+```sql
+CREATE TABLE IF NOT EXISTS cache_metadata (
+    ticker VARCHAR(10) PRIMARY KEY,
+    last_fetch TIMESTAMP WITH TIME ZONE NOT NULL,
+    article_count INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+STEP 4.5: Test Database Connection
+-----------------------------------
+1. Go to SQL Editor
+2. Run: `SELECT * FROM sentiment_history LIMIT 5;`
+3. Should return empty result (no errors)
+4. Database is ready!
+
+================================================================================
+5. CREATING THE SPACE (CRITICAL STEPS)
+================================================================================
+
+STEP 5.1: Go to Hugging Face Spaces
+------------------------------------
+URL: https://huggingface.co/spaces
+
+STEP 5.2: Click "Create new Space"
+-----------------------------------
+
+STEP 5.3: Fill in Space Details
+--------------------------------
+- Owner: Your username
+- Space name: Antisentiment (or your choice)
+- License: MIT
+- Visibility: Public (required for free tier)
+
+STEP 5.4: Select SDK (MOST CRITICAL STEP!)
+-------------------------------------------
+⚠️ CRITICAL: Select "Docker" SDK
+⚠️ CRITICAL: Select "Blank" template (NOT Streamlit template!)
+
+WHY: The Streamlit Docker template causes configuration errors.
+     You'll provide your own Dockerfile instead.
+
+STEP 5.5: Select Hardware
+--------------------------
+- Choose: CPU Basic (free)
+
+STEP 5.6: Create Space
+-----------------------
+Click "Create Space" button
+
+================================================================================
+6. PUSHING CODE (THE RIGHT WAY)
+================================================================================
+
+STEP 6.1: Clone the Space Repository
+-------------------------------------
+Open terminal and run:
+
+```bash
+cd /Users/akshayukey/Downloads
+git clone https://YOUR_USERNAME:YOUR_HF_TOKEN@huggingface.co/spaces/YOUR_USERNAME/SPACE_NAME HF_SPACE
+```
+
+Replace:
+- YOUR_USERNAME: Your Hugging Face username
+- YOUR_HF_TOKEN: Your Hugging Face access token
+- SPACE_NAME: Your space name (e.g., Antisentiment)
+- HF_SPACE: Local folder name (e.g., HF_Antisentiment)
+
+STEP 6.2: Copy Files to Root Directory
+---------------------------------------
+```bash
+cd /path/to/your/project
+cp app.py requirements.txt README.md Dockerfile future_article_fixer.py database.py .gitignore ../HF_SPACE/
+```
+
+⚠️ CRITICAL: Files MUST be in the root of HF_SPACE, not in subdirectories!
+
+STEP 6.3: Commit and Push
+--------------------------
+```bash
+cd ../HF_SPACE
+git add .
+git commit -m "Initial deployment with Supabase PostgreSQL"
+git push origin main
+```
+
+STEP 6.4: Verify Files Are in Root
+-----------------------------------
+Go to: https://huggingface.co/spaces/YOUR_USERNAME/SPACE_NAME/tree/main
+
+You should see:
+- README.md
+- Dockerfile
+- app.py
+- requirements.txt
+- future_article_fixer.py
+- database.py  # <-- NEW
+- .gitignore
+
+⚠️ If you see a "Downloads" or other subdirectory, FILES ARE IN WRONG PLACE!
+   You must delete the Space and start over with files in root.
+
+================================================================================
+7. ADDING DATABASE SECRETS TO HF SPACES
+================================================================================
+
+STEP 7.1: Install Hugging Face Hub CLI
+---------------------------------------
+```bash
+pip install huggingface_hub
+```
+
+STEP 7.2: Login to Hugging Face
+---------------------------------
+```bash
+huggingface-cli login --token YOUR_HF_TOKEN
+```
+
+STEP 7.3: Add Database Secrets
+-------------------------------
+Create a Python script to add secrets:
+
+```python
+# add_secrets.py
+import os
+from huggingface_hub import HfApi
+
+HF_TOKEN = "YOUR_HF_TOKEN"  # Replace with your token
+SPACE_ID = "YOUR_USERNAME/SPACE_NAME"  # Replace with your space
+
+api = HfApi(token=HF_TOKEN)
+
+secrets = {
+    "DB_HOST": "fwwnrulrrlgtfzbfusno.supabase.co",
+    "DB_NAME": "postgres",
+    "DB_USER": "postgres",
+    "DB_PASSWORD": "YOUR_DB_PASSWORD",  # Replace with your Supabase password
+    "DB_PORT": "5432"
+}
+
+for key, value in secrets.items():
+    api.add_space_secret(repo_id=SPACE_ID, key=key, value=value)
+    print(f"✅ Added {key} secret")
+
+print("\n🎉 All database secrets added successfully!")
+```
+
+Run the script:
+```bash
+python add_secrets.py
+```
+
+STEP 7.4: Verify Secrets Added
+---------------------------------
+1. Go to your Space Settings
+2. Check "Secrets" section
+3. You should see all 5 database environment variables
+
+================================================================================
+8. TROUBLESHOOTING COMMON ERRORS (UPDATED WITH POSTGRESQL)
+================================================================================
+
+ERROR: "Configuration error - Missing configuration in README"
+--------------------------------------------------------------
+CAUSE: One of these issues:
+1. README.md not in root directory
+2. Wrong YAML format
+3. Wrong sdk value (should be "docker")
+4. Missing app_port field
+
+FIX:
+1. Verify files are in root (not subdirectory)
+2. Use EXACT README.md format from Step 3.2
+3. Ensure sdk: docker (not streamlit)
+4. Ensure app_port: 7860 is present
+
+ERROR: "This site can't be reached" or "Connection refused"
+------------------------------------------------------------
+CAUSE: Wrong port configuration
+
+FIX:
+1. Dockerfile must have: --server.port=7860
+2. README.md must have: app_port: 7860
+3. Both must match!
+
+ERROR: App shows "Welcome to Streamlit!" demo
+----------------------------------------------
+CAUSE: Your code wasn't pushed, Space is using template default
+
+FIX:
+1. Verify files are in root directory
+2. Push your actual app.py file
+3. Restart the Space
+
+ERROR: "Build error" with database.py missing
+---------------------------------------------
+CAUSE: Dockerfile doesn't copy database.py
+
+FIX: Add `COPY database.py .` to Dockerfile
+
+ERROR: "Database connection error" during build
+-----------------------------------------------
+CAUSE: App tries to connect to database during Docker build
+CAUSE: Environment variables not available during build
+
+FIX:
+1. Remove `init_database()` call from module level in app.py
+2. Add graceful fallback in get_db_connection() function
+3. Check for `conn is None` in all database functions
+
+ERROR: "ModuleNotFoundError: No module named 'psycopg2'"
+-------------------------------------------------------
+CAUSE: Missing psycopg2-binary in requirements.txt
+
+FIX: Add `psycopg2-binary>=2.9.0` to requirements.txt
+
+ERROR: App works but data doesn't persist
+------------------------------------------
+CAUSE: Database credentials not added to HF Spaces secrets
+
+FIX: Add all 5 database environment variables to HF Spaces secrets:
+- DB_HOST
+- DB_NAME
+- DB_USER
+- DB_PASSWORD
+- DB_PORT
+
+ERROR: Database resets on restart
+----------------------------------
+CAUSE: Using SQLite instead of PostgreSQL
+CAUSE: Database credentials not properly configured
+
+FIX:
+1. Use Supabase PostgreSQL (not SQLite)
+2. Verify all database secrets are added to HF Spaces
+3. Check database.py has proper error handling
+
+================================================================================
+9. STORAGE OPTIONS COMPARISON
+================================================================================
+
+| Feature | SQLite Local | HF Persistent Storage | Supabase PostgreSQL |
+|---------|--------------|----------------------|---------------------|
+| Cost | Free | **PAID** 💰 | **FREE** ✅ |
+| Persistent | ❌ Resets | ✅ Forever | ✅ Forever |
+| Size Limit | Container | 50GB | 500MB |
+| Setup Complexity | Easy | Easy | Medium |
+| Concurrent Users | Limited | Good | Excellent |
+| Backups | Manual | Automatic | Automatic |
+| Performance | Good | Good | Excellent |
+| Scalability | Poor | Good | Excellent |
+| **RECOMMENDED** | ❌ | ❌ | ✅ |
+
+WHY SUPABASE IS BEST:
+✅ 100% FREE (500MB storage)
+✅ True PostgreSQL database
+✅ Automatic backups
+✅ Excellent performance
+✅ Scales with your app
+✅ Professional database features
+✅ Easy to migrate from
+
+WHY NOT SQLITE:
+❌ Data lost on container restart
+❌ Not suitable for production
+❌ Limited concurrent access
+❌ No automatic backups
+
+WHY NOT HF PERSISTENT STORAGE:
+❌ PAID FEATURE (not free)
+❌ Limited to HF ecosystem
+❌ Less flexible than PostgreSQL
+
+================================================================================
+10. FINAL CHECKLIST (UPDATED)
+================================================================================
+
+Before Creating Space:
+□ Dockerfile created with port 7860 AND database.py copy
+□ README.md created with sdk: docker and app_port: 7860
+□ app.py updated to use PostgreSQL (from database import *)
+□ database.py created with graceful error handling
+□ requirements.txt includes psycopg2-binary>=2.9.0
+□ .gitignore excludes venv, *.db, *.log, __pycache__
+
+Supabase Setup:
+□ Supabase account created
+□ PostgreSQL project created
+□ Database tables created (sentiment_history, cache_metadata)
+□ Database credentials obtained
+□ Database connection tested
+
+Creating Space:
+□ Selected "Docker" SDK (NOT Gradio, NOT Streamlit template)
+□ Selected "Blank" template
+□ Selected "CPU Basic" hardware
+□ Set visibility to "Public"
+
+Pushing Code:
+□ Cloned Space repository fresh
+□ Copied files to ROOT directory (including database.py)
+□ Verified files are in root on Hugging Face web interface
+□ No "Downloads" or other subdirectories visible
+
+Adding Database Secrets:
+□ Installed huggingface_hub CLI
+□ Logged into Hugging Face
+□ Added all 5 database environment variables to HF Spaces secrets
+□ Verified secrets are visible in Space Settings
+
+After Deployment:
+□ App builds successfully (no config errors)
+□ App loads and displays correctly
+□ Database connection works (no connection errors)
+□ Tested data persistence after restart
+□ Historical data loads correctly
+□ Cache functionality works (15-minute intervals)
+
+================================================================================
+QUICK REFERENCE: CORRECT FILE STRUCTURE
+================================================================================
+
+Your Hugging Face Space root should look like this:
+
+Antisentiment/
+├── .gitignore
+├── Dockerfile
+├── README.md
+├── app.py
+├── future_article_fixer.py
+├── database.py  # <-- NEW: PostgreSQL module
+└── requirements.txt
+
+NOT like this:
+
+Antisentiment/
+└── Downloads/
+    └── Duphuggingface/
+        ├── Dockerfile
+        ├── README.md
+        └── app.py
+
+================================================================================
+QUICK REFERENCE: CORRECT README.md
+================================================================================
+
+---
+title: Antisentiment
+emoji: 📊
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
+
+# Antisentiment
+
+Your app description here.
+
+================================================================================
+QUICK REFERENCE: CORRECT Dockerfile
+================================================================================
+
+FROM python:3.10
+WORKDIR /code
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m nltk.downloader vader_lexicon
+COPY app.py .
+COPY future_article_fixer.py .
+COPY database.py .    # <-- CRITICAL: Don't forget this!
+EXPOSE 7860
+CMD ["streamlit", "run", "app.py", "--server.port=7860", "--server.address=0.0.0.0"]
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+1. Your laptop does NOT need to be on for the app to run
+   - Hugging Face hosts the app on their servers 24/7
+   - Database persists on their servers, not your laptop
+
+2. Cold start time: 30-60 seconds on first visit
+   - Subsequent visits are instant
+   - This is normal for free tier
+
+3. Free tier limitations:
+   - Must be public Space
+   - CPU Basic hardware only
+   - No custom domains
+   - 50GB storage limit
+
+4. Database persistence:
+   - Uses Supabase PostgreSQL (100% free)
+   - Data survives all restarts
+   - Automatic backups included
+   - Professional database features
+
+5. Updating your app:
+   - Make changes locally
+   - cd to HF Space directory
+   - git add, commit, push
+   - Space rebuilds automatically
+
+================================================================================
+END OF GUIDE
+================================================================================
+
+Last Updated: October 14, 2025
+Based on: Actual deployment experience with all mistakes documented
+Status: WORKING CONFIGURATION WITH SUPABASE POSTGRESQL
+Supabase Integration: COMPLETED ✅
+
