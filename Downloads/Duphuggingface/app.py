@@ -582,7 +582,14 @@ with col1:
                 ticker = selected_ticker
 
 with col2:
-    view_mode = st.selectbox('View', ['Historical (7 days)', 'Historical (30 days)'], index=1, key='view_selector')
+    view_mode = st.selectbox('View', [
+        'Historical (7 days)', 
+        'Historical (30 days)', 
+        'Historical (60 days)', 
+        'Historical (90 days)', 
+        'Historical (6 months)', 
+        'Historical (1 year)'
+    ], index=1, key='view_selector')
 
 if ticker:
     try:
@@ -616,7 +623,22 @@ if ticker:
                     st.error(f"❌ Error fetching news: {str(e)}")
         
         # Get historical data (including newly fetched data)
-        days = 7 if '7' in view_mode else 30
+        # Parse days from view_mode
+        if '7' in view_mode:
+            days = 7
+        elif '30' in view_mode:
+            days = 30
+        elif '60' in view_mode:
+            days = 60
+        elif '90' in view_mode:
+            days = 90
+        elif '6 months' in view_mode:
+            days = 180  # 6 months ≈ 180 days
+        elif '1 year' in view_mode:
+            days = 365  # 1 year = 365 days
+        else:
+            days = 30  # default fallback
+        
         historical_df = get_historical_data(ticker, days=days)
         
         if len(historical_df) > 0:
