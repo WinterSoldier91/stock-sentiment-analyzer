@@ -273,20 +273,22 @@ def create_chart(df, ticker, chart_type='bar', timeframe='hourly'):
         )
         return fig
     
-    # Resample data based on timeframe
+    # Create better visualization by grouping data points
     if timeframe == 'hourly':
-        resampled_df = numeric_df.resample('h').mean()
+        # Group by hour for hourly chart
+        chart_df = numeric_df.resample('H').mean()
         title_suffix = 'Hourly'
     else:
-        resampled_df = numeric_df.resample('D').mean()
+        # Group by day for daily chart  
+        chart_df = numeric_df.resample('D').mean()
         title_suffix = 'Daily'
     
-    if resampled_df.empty:
-        logger.warning(f"No resampled data for {ticker} {timeframe}")
+    if chart_df.empty:
+        logger.warning(f"No data for {ticker} {timeframe}")
         # Create empty chart
         fig = go.Figure()
         fig.add_annotation(
-            text=f"No resampled data available for {ticker} {timeframe}",
+            text=f"No data available for {ticker} {timeframe}",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
             font=dict(size=16, color="#666666")
@@ -302,8 +304,8 @@ def create_chart(df, ticker, chart_type='bar', timeframe='hourly'):
     # Create figure based on chart type
     if chart_type == 'line':
         fig = go.Figure(data=go.Scatter(
-            x=resampled_df.index,
-            y=resampled_df['sentiment_score'],
+            x=chart_df.index,
+            y=chart_df['sentiment_score'],
             mode='lines+markers',
             name=f'{ticker} Sentiment',
             line=dict(color='#1f77b4', width=3),
@@ -312,20 +314,21 @@ def create_chart(df, ticker, chart_type='bar', timeframe='hourly'):
         ))
     elif chart_type == 'scatter':
         fig = go.Figure(data=go.Scatter(
-            x=resampled_df.index,
-            y=resampled_df['sentiment_score'],
+            x=chart_df.index,
+            y=chart_df['sentiment_score'],
             mode='markers',
             name=f'{ticker} Sentiment',
             marker=dict(size=10, color='#1f77b4'),
             hovertemplate='<b>%{x}</b><br>Sentiment: %{y:.3f}<extra></extra>'
         ))
     else:  # bar chart
-        colors = ['#ff6b6b' if x < 0 else '#51cf66' for x in resampled_df['sentiment_score']]
+        colors = ['#ff6b6b' if x < 0 else '#51cf66' for x in chart_df['sentiment_score']]
         fig = go.Figure(data=go.Bar(
-            x=resampled_df.index,
-            y=resampled_df['sentiment_score'],
+            x=chart_df.index,
+            y=chart_df['sentiment_score'],
             name=f'{ticker} Sentiment',
             marker_color=colors,
+            width=0.8,
             hovertemplate='<b>%{x}</b><br>Sentiment: %{y:.3f}<extra></extra>'
         ))
     
@@ -340,7 +343,11 @@ def create_chart(df, ticker, chart_type='bar', timeframe='hourly'):
             title='Time',
             showgrid=True,
             gridcolor='#e0e0e0',
-            title_font={'size': 14, 'color': '#333333'}
+            title_font={'size': 14, 'color': '#333333'},
+            tickformat='%m-%d %H:%M',
+            tickangle=45,
+            tickmode='auto',
+            nticks=10
         ),
         yaxis=dict(
             title='Sentiment Score',
