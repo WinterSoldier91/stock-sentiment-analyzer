@@ -3,11 +3,8 @@ title: Antisentiment
 emoji: 📊
 colorFrom: blue
 colorTo: purple
-sdk: streamlit
-sdk_version: 1.25.0
-app_file: app.py
-python_version: 3.9.13
-pinned: false
+sdk: docker
+app_port: 7860
 ---
 
 # Antisentiment
