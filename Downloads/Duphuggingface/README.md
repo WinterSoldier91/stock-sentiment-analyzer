@@ -1,5 +1,5 @@
 ---
-title: Stock Sentiment Analyzer
+title: Antisentiment
 emoji: 📊
 colorFrom: blue
 colorTo: purple
@@ -8,6 +8,6 @@ app_file: app.py
 pinned: false
 ---
 
-# Stock Sentiment Analyzer
+# Antisentiment
 
 A professional stock sentiment analysis tool with TradingView-style charts and real-time news fetching.
