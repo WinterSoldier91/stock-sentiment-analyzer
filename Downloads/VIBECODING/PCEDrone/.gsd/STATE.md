@@ -2,18 +2,18 @@
 
 **Active Milestone:** M001 — Launch-Ready Workshop Ops Core
 **Active Slice:** S01 — Registration Contract & Seat Engine
-**Active Task:** None — slice task decomposition not written yet
-**Phase:** Planning
+**Active Task:** T01 — Version Apps Script intake contract from source docs
+**Phase:** Executing
 
 ## Recent Decisions
 - Expanded planning horizon from single milestone to a three-milestone sequence.
-- M002 is dedicated to automated participant communication with operator controls.
-- M003 is dedicated to reusable configuration-driven rollout for future workshops.
-- Added dependency chain M001 → M002 → M003 via `depends_on` in milestone contexts.
+- M001 remains active; downstream milestones stay queued behind dependency chain.
+- S01 decomposed into T01–T03 with contract-first verification commands.
+- S01 verification strategy is fixture/contract-level locally, with full real integration deferred to S04.
 - Preserved non-negotiable invariant: no ambiguous confirmations.
 
 ## Blockers
 - None
 
 ## Next Action
-Write `S01-PLAN.md` and task-level `T##-PLAN.md` files for M001/S01, then execute M001 before advancing to M002.
+Execute T01: create `apps-script/Code.gs` and `apps-script/README.md`, then run `bash scripts/verify-s01-sheet-contract.sh`.
