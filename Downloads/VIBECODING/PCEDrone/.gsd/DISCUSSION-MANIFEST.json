@@ -1,0 +1,10 @@
+{
+  "primary": "M001",
+  "milestones": {
+    "M001": { "gate": "discussed", "context": "full" },
+    "M002": { "gate": "discussed", "context": "full" },
+    "M003": { "gate": "discussed", "context": "full" }
+  },
+  "total": 3,
+  "gates_completed": 3
+}

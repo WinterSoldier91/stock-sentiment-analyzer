@@ -12,3 +12,6 @@
 | D004 | M001 | pattern | Capacity behavior when preferred batch is full | Auto-shift to next available batch; waitlist only when all batches are full | Preserves conversion while keeping deterministic seat caps | Yes — if policy changes |
 | D005 | M001 | verification | Milestone completion proof level | Require a real integrated submit→pay→confirm run, not docs-only proof | Live launch confidence requires real runtime evidence | No |
 | D006 | M001 | scope | Early risk retirement order | Prioritize payment reconciliation risk before polish/automation expansion | Highest failure impact sits in payment-to-confirmation correctness | Yes — once risk is retired |
+| D007 | M001 | scope | Planning horizon | Expand from single milestone bootstrap to full multi-milestone plan now | User explicitly requested doing all milestones in current planning pass | Yes — if priorities change |
+| D008 | M001 | arch | Milestone dependency chain | M001 establishes correctness, M002 adds automation controls, M003 adds reusable rollout | Preserves invariant-first sequencing and avoids scaling unstable foundations | No |
+| D009 | M001 | convention | Context dependency encoding | Add `depends_on` frontmatter to downstream milestone contexts | Auto-mode execution order depends on this field for sequencing safety | No |

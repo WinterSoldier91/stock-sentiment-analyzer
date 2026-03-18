@@ -83,13 +83,35 @@ Guidelines:
 ### R007 — Core external integration completeness
 - Class: integration
 - Status: active
-- Description: M001 must integrate Google Form, Google Sheet, Google Apps Script, and Razorpay as one coherent workflow.
+- Description: The project must integrate Google Form, Google Sheet, Google Apps Script, and Razorpay as one coherent workflow.
 - Why it matters: The promised organizer experience depends on these systems working together.
 - Source: user
 - Primary owning slice: M001/S04
 - Supporting slices: M001/S01, M001/S02, M001/S03
 - Validation: mapped
-- Notes: WhatsApp automation is intentionally excluded from M001.
+- Notes: Communication automation and reusability layers build on this base.
+
+### R020 — Automated participant communication
+- Class: integration
+- Status: active
+- Description: Registration acknowledgements, payment reminders, urgency nudges, and confirmation messages are sent automatically based on canonical workflow state.
+- Why it matters: Reduces manual operator load and response lag while preserving participant clarity.
+- Source: user
+- Primary owning slice: M002/S01 (provisional)
+- Supporting slices: M002/S02 (provisional), M003/S01 (provisional)
+- Validation: mapped
+- Notes: Messaging must never violate R002; delivery failures must be visible to operators.
+
+### R021 — Reusable multi-workshop rollout template
+- Class: differentiator
+- Status: active
+- Description: A new workshop can be launched via configuration-driven setup using the same validated workflow contracts.
+- Why it matters: Improves repeatability and prevents drift when scaling beyond a single workshop run.
+- Source: inferred
+- Primary owning slice: M003/S01 (provisional)
+- Supporting slices: M003/S02 (provisional)
+- Validation: mapped
+- Notes: Focus is reusable rollout, not full multi-tenant SaaS productization.
 
 ## Validated
 
@@ -97,40 +119,20 @@ None yet.
 
 ## Deferred
 
-### R020 — WhatsApp automation
-- Class: integration
-- Status: deferred
-- Description: Send registration, urgency, and confirmation messages automatically via WhatsApp APIs.
-- Why it matters: It can reduce manual communication overhead after launch stability is proven.
-- Source: user
-- Primary owning slice: none
-- Supporting slices: none
-- Validation: unmapped
-- Notes: Deferred to keep M001 focused on payment certainty and core flow reliability.
-
-### R021 — Reusable multi-workshop template
-- Class: differentiator
-- Status: deferred
-- Description: Package the workflow so future workshops can be cloned with minimal reconfiguration.
-- Why it matters: Improves repeatability and reduces setup work across events.
-- Source: inferred
-- Primary owning slice: none
-- Supporting slices: none
-- Validation: unmapped
-- Notes: Deferred until single-workshop launch path is proven.
+None currently.
 
 ## Out of Scope
 
-### R030 — Multi-event organizer platform in M001
+### R030 — Multi-event organizer platform in current planning horizon
 - Class: anti-feature
 - Status: out-of-scope
-- Description: Building a generalized multi-event product with broad organizer abstractions.
-- Why it matters: Prevents scope drift from the immediate launch-critical objective.
+- Description: Building a generalized multi-event SaaS with broad organizer abstractions and tenant-level product complexity.
+- Why it matters: Prevents scope drift away from operationally grounded phased delivery.
 - Source: user
 - Primary owning slice: none
 - Supporting slices: none
 - Validation: n/a
-- Notes: Can be revisited only after launch-grade single-flow stability.
+- Notes: Can be revisited only after template-driven reuse is proven in practice.
 
 ### R031 — Controlled overbooking
 - Class: anti-feature
@@ -154,14 +156,14 @@ None yet.
 | R005 | failure-visibility | active | M001/S03 | M001/S04 | mapped |
 | R006 | operability | active | M001/S01 | M001/S04 | mapped |
 | R007 | integration | active | M001/S04 | M001/S01, M001/S02, M001/S03 | mapped |
-| R020 | integration | deferred | none | none | unmapped |
-| R021 | differentiator | deferred | none | none | unmapped |
+| R020 | integration | active | M002/S01 (provisional) | M002/S02 (provisional), M003/S01 (provisional) | mapped |
+| R021 | differentiator | active | M003/S01 (provisional) | M003/S02 (provisional) | mapped |
 | R030 | anti-feature | out-of-scope | none | none | n/a |
 | R031 | anti-feature | out-of-scope | none | none | n/a |
 
 ## Coverage Summary
 
-- Active requirements: 7
-- Mapped to slices: 7
+- Active requirements: 9
+- Mapped to slices: 9
 - Validated: 0
 - Unmapped active requirements: 0
