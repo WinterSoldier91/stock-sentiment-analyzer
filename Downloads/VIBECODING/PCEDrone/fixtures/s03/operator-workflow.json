@@ -1,0 +1,30 @@
+{
+  "scenarios": [
+    {
+      "id": "queue_counts_from_status_and_review_log",
+      "responses": [
+        { "status": "REGISTERED", "batchAssigned": "Batch 1", "paymentStatus": "PENDING" },
+        { "status": "REVIEW_REQUIRED", "batchAssigned": "Batch 2", "paymentStatus": "PENDING" },
+        { "status": "REVIEW_REQUIRED", "batchAssigned": "Batch 1", "paymentStatus": "PAID" },
+        { "status": "CONFIRMED", "batchAssigned": "Batch 1", "paymentStatus": "PAID" },
+        { "status": "WAITLISTED", "batchAssigned": "Waitlist", "paymentStatus": "PENDING" }
+      ],
+      "webhookReviews": [
+        { "decision": "AMBIGUOUS" },
+        { "decision": "AMBIGUOUS" },
+        { "decision": "UNMATCHED" },
+        { "decision": "REPLAY" },
+        { "decision": "REJECTED" }
+      ],
+      "expected": {
+        "reviewRequired": 2,
+        "decisionCounts": {
+          "AMBIGUOUS": 2,
+          "UNMATCHED": 1,
+          "REPLAY": 1,
+          "REJECTED": 1
+        }
+      }
+    }
+  ]
+}

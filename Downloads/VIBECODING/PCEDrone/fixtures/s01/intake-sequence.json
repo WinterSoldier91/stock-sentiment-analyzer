@@ -1,0 +1,39 @@
+{
+  "scenarios": [
+    {
+      "id": "normal_fill_then_waitlist",
+      "maxPerBatch": 2,
+      "totalBatches": 2,
+      "defaultPaymentLink": "https://rzp.io/l/default",
+      "inputs": [
+        { "name": "A", "batchPreference": "Batch 1" },
+        { "name": "B", "batchPreference": "Batch 1" },
+        { "name": "C", "batchPreference": "Batch 1" },
+        { "name": "D", "batchPreference": "Batch 2" },
+        { "name": "E", "batchPreference": "No preference" }
+      ],
+      "expected": [
+        { "batchAssigned": "Batch 1", "status": "REGISTERED", "paymentStatus": "PENDING", "paymentLink": "https://rzp.io/l/default" },
+        { "batchAssigned": "Batch 1", "status": "REGISTERED", "paymentStatus": "PENDING", "paymentLink": "https://rzp.io/l/default" },
+        { "batchAssigned": "Batch 2", "status": "REGISTERED", "paymentStatus": "PENDING", "paymentLink": "https://rzp.io/l/default" },
+        { "batchAssigned": "Batch 2", "status": "REGISTERED", "paymentStatus": "PENDING", "paymentLink": "https://rzp.io/l/default" },
+        { "batchAssigned": "Waitlist", "status": "WAITLISTED", "paymentStatus": "PENDING", "paymentLink": "" }
+      ]
+    },
+    {
+      "id": "premium_pref_gets_premium_link_when_registered",
+      "maxPerBatch": 1,
+      "totalBatches": 1,
+      "defaultPaymentLink": "https://rzp.io/l/default",
+      "premiumPaymentLink": "https://rzp.io/l/premium",
+      "inputs": [
+        { "name": "P1", "batchPreference": "Premium 2500" },
+        { "name": "P2", "batchPreference": "Premium 2500" }
+      ],
+      "expected": [
+        { "batchAssigned": "Batch 1", "status": "REGISTERED", "paymentStatus": "PENDING", "paymentLink": "https://rzp.io/l/premium" },
+        { "batchAssigned": "Waitlist", "status": "WAITLISTED", "paymentStatus": "PENDING", "paymentLink": "" }
+      ]
+    }
+  ]
+}

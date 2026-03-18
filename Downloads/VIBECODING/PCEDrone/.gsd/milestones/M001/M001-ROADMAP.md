@@ -47,13 +47,13 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Registration Contract & Seat Engine** `risk:high` `depends:[]`
+- [x] **S01: Registration Contract & Seat Engine** `risk:high` `depends:[]`
   > After this: Form submissions deterministically populate state columns and assign seats with auto-shift and hard-cap waitlist behavior.
 
-- [ ] **S02: Payment Reconciliation & Confirmation Invariant** `risk:high` `depends:[S01]`
+- [x] **S02: Payment Reconciliation & Confirmation Invariant** `risk:high` `depends:[S01]`
   > After this: Payment events reconcile safely with signature/idempotency guardrails and only unambiguous paid registrations can become confirmed.
 
-- [ ] **S03: Operator Dashboard & Exception Workflow** `risk:medium` `depends:[S01,S02]`
+- [x] **S03: Operator Dashboard & Exception Workflow** `risk:medium` `depends:[S01,S02]`
   > After this: Organizer can see pending/confirmed/waitlisted/review-required states and resolve exceptions with explicit note/status patterns.
 
 - [ ] **S04: End-to-End Launch Proof & Hardening** `risk:medium` `depends:[S01,S02,S03]`

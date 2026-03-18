@@ -1,0 +1,184 @@
+{
+  "scenarios": [
+    {
+      "id": "matched_single_candidate",
+      "rows": [
+        {
+          "row": 2,
+          "phone": "9876543210",
+          "batchAssigned": "Batch 1",
+          "paymentLink": "https://rzp.io/l/a",
+          "status": "REGISTERED",
+          "paymentStatus": "PENDING"
+        }
+      ],
+      "event": {
+        "eventName": "payment_link.paid",
+        "paymentLinkId": "plink_a",
+        "paymentLinkShortUrl": "https://rzp.io/l/a",
+        "paymentId": "pay_a",
+        "customerContact": "+91 9876543210"
+      },
+      "expected": {
+        "decision": "MATCHED",
+        "reason": "single_candidate_match",
+        "row": 2,
+        "candidateRows": [2],
+        "rows": [
+          { "row": 2, "status": "CONFIRMED", "paymentStatus": "PAID" }
+        ]
+      }
+    },
+    {
+      "id": "ambiguous_multiple_phone_match",
+      "rows": [
+        {
+          "row": 2,
+          "phone": "9000000000",
+          "batchAssigned": "Batch 1",
+          "paymentLink": "https://rzp.io/l/x",
+          "status": "REGISTERED",
+          "paymentStatus": "PENDING"
+        },
+        {
+          "row": 3,
+          "phone": "9000000000",
+          "batchAssigned": "Batch 2",
+          "paymentLink": "https://rzp.io/l/y",
+          "status": "REGISTERED",
+          "paymentStatus": "PENDING"
+        }
+      ],
+      "event": {
+        "eventName": "payment_link.paid",
+        "paymentLinkId": "plink_amb",
+        "paymentLinkShortUrl": "",
+        "paymentId": "pay_amb",
+        "customerContact": "9000000000"
+      },
+      "expected": {
+        "decision": "AMBIGUOUS",
+        "reason": "multiple_rows_share_identifier",
+        "candidateRows": [2, 3],
+        "rows": [
+          { "row": 2, "status": "REVIEW_REQUIRED", "paymentStatus": "PENDING" },
+          { "row": 3, "status": "REVIEW_REQUIRED", "paymentStatus": "PENDING" }
+        ]
+      }
+    },
+    {
+      "id": "unmatched_no_candidate",
+      "rows": [
+        {
+          "row": 2,
+          "phone": "8000000000",
+          "batchAssigned": "Batch 1",
+          "paymentLink": "https://rzp.io/l/u",
+          "status": "REGISTERED",
+          "paymentStatus": "PENDING"
+        }
+      ],
+      "event": {
+        "eventName": "payment_link.paid",
+        "paymentLinkId": "plink_none",
+        "paymentLinkShortUrl": "https://rzp.io/l/none",
+        "paymentId": "pay_none",
+        "customerContact": "8111111111"
+      },
+      "expected": {
+        "decision": "UNMATCHED",
+        "reason": "no_matching_row",
+        "candidateRows": [],
+        "rows": [
+          { "row": 2, "status": "REGISTERED", "paymentStatus": "PENDING" }
+        ]
+      }
+    },
+    {
+      "id": "waitlist_not_confirmable",
+      "rows": [
+        {
+          "row": 2,
+          "phone": "7777777777",
+          "batchAssigned": "Waitlist",
+          "paymentLink": "",
+          "status": "WAITLISTED",
+          "paymentStatus": "PENDING"
+        }
+      ],
+      "event": {
+        "eventName": "payment_link.paid",
+        "paymentLinkId": "plink_wait",
+        "paymentLinkShortUrl": "",
+        "paymentId": "pay_wait",
+        "customerContact": "7777777777"
+      },
+      "expected": {
+        "decision": "UNMATCHED",
+        "reason": "no_matching_row",
+        "candidateRows": [],
+        "rows": [
+          { "row": 2, "status": "WAITLISTED", "paymentStatus": "PENDING" }
+        ]
+      }
+    },
+    {
+      "id": "rejected_unsupported_event",
+      "rows": [
+        {
+          "row": 2,
+          "phone": "7444444444",
+          "batchAssigned": "Batch 1",
+          "paymentLink": "https://rzp.io/l/r",
+          "status": "REGISTERED",
+          "paymentStatus": "PENDING"
+        }
+      ],
+      "event": {
+        "eventName": "payment.failed",
+        "paymentLinkId": "plink_r",
+        "paymentLinkShortUrl": "https://rzp.io/l/r",
+        "paymentId": "pay_r",
+        "customerContact": "7444444444"
+      },
+      "expected": {
+        "decision": "REJECTED",
+        "reason": "unsupported_event",
+        "candidateRows": [],
+        "rows": [
+          { "row": 2, "status": "REGISTERED", "paymentStatus": "PENDING" }
+        ]
+      }
+    },
+    {
+      "id": "duplicate_event_replay_ignored",
+      "runTwice": true,
+      "rows": [
+        {
+          "row": 2,
+          "phone": "7222222222",
+          "batchAssigned": "Batch 1",
+          "paymentLink": "https://rzp.io/l/d",
+          "status": "REGISTERED",
+          "paymentStatus": "PENDING"
+        }
+      ],
+      "event": {
+        "eventName": "payment_link.paid",
+        "paymentLinkId": "plink_dup",
+        "paymentLinkShortUrl": "https://rzp.io/l/d",
+        "paymentId": "pay_dup",
+        "customerContact": "7222222222"
+      },
+      "expected": {
+        "decision": "MATCHED",
+        "reason": "single_candidate_match",
+        "secondDecision": "REPLAY",
+        "secondReason": "duplicate_event",
+        "rows": [
+          { "row": 2, "status": "CONFIRMED", "paymentStatus": "PAID" }
+        ]
+      }
+    }
+  ]
+}

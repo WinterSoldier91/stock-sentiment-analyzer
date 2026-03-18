@@ -22,8 +22,8 @@ Guidelines:
 - Source: user
 - Primary owning slice: M001/S01
 - Supporting slices: M001/S03
-- Validation: mapped
-- Notes: Must remain deterministic under repeated submissions and mixed preference patterns.
+- Validation: partial
+- Notes: S01 established deterministic fixture verification and no-overfill checks; live runtime proof remains for S04.
 
 ### R002 — Unambiguous confirmation invariant
 - Class: constraint
@@ -33,8 +33,8 @@ Guidelines:
 - Source: user
 - Primary owning slice: M001/S02
 - Supporting slices: M001/S03, M001/S04
-- Validation: mapped
-- Notes: This requirement directly encodes “no ambiguous confirmations.”
+- Validation: partial
+- Notes: S02 implemented decisive-match confirmation and explicit ambiguous/review routing; full live integrated proof remains for S04.
 
 ### R003 — Real end-to-end launch flow
 - Class: launchability
@@ -55,8 +55,8 @@ Guidelines:
 - Source: research
 - Primary owning slice: M001/S02
 - Supporting slices: M001/S03
-- Validation: mapped
-- Notes: Includes webhook signature verification and duplicate event guardrails.
+- Validation: partial
+- Notes: S02 added signature verification, deterministic reconciliation, and replay guardrails with fixture coverage; live endpoint proof remains for S04.
 
 ### R005 — Operator failure visibility and exception handling
 - Class: failure-visibility
@@ -66,8 +66,8 @@ Guidelines:
 - Source: inferred
 - Primary owning slice: M001/S03
 - Supporting slices: M001/S04
-- Validation: mapped
-- Notes: Exception states must be explicit in dashboard/sheet views.
+- Validation: partial
+- Notes: S02+S03 added review-required status surfaces, `Webhook Review`, dashboard queue metrics, and guarded operator resolution flow; live runtime proof remains for S04.
 
 ### R006 — Reproducible launch setup
 - Class: operability
@@ -77,8 +77,8 @@ Guidelines:
 - Source: inferred
 - Primary owning slice: M001/S01
 - Supporting slices: M001/S04
-- Validation: mapped
-- Notes: Must include checks for common setup failure points.
+- Validation: partial
+- Notes: S01 added reproducible local pre-launch checks; full integrated launch proof remains for S04.
 
 ### R007 — Core external integration completeness
 - Class: integration
@@ -149,12 +149,12 @@ None currently.
 
 | ID | Class | Status | Primary owner | Supporting | Proof |
 |---|---|---|---|---|---|
-| R001 | primary-user-loop | active | M001/S01 | M001/S03 | mapped |
-| R002 | constraint | active | M001/S02 | M001/S03, M001/S04 | mapped |
+| R001 | primary-user-loop | active | M001/S01 | M001/S03 | partial |
+| R002 | constraint | active | M001/S02 | M001/S03, M001/S04 | partial |
 | R003 | launchability | active | M001/S04 | M001/S01, M001/S02, M001/S03 | mapped |
-| R004 | compliance/security | active | M001/S02 | M001/S03 | mapped |
-| R005 | failure-visibility | active | M001/S03 | M001/S04 | mapped |
-| R006 | operability | active | M001/S01 | M001/S04 | mapped |
+| R004 | compliance/security | active | M001/S02 | M001/S03 | partial |
+| R005 | failure-visibility | active | M001/S03 | M001/S04 | partial |
+| R006 | operability | active | M001/S01 | M001/S04 | partial |
 | R007 | integration | active | M001/S04 | M001/S01, M001/S02, M001/S03 | mapped |
 | R020 | integration | active | M002/S01 (provisional) | M002/S02 (provisional), M003/S01 (provisional) | mapped |
 | R021 | differentiator | active | M003/S01 (provisional) | M003/S02 (provisional) | mapped |

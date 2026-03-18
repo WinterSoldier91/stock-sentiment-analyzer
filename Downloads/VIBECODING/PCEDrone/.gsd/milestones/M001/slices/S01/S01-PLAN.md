@@ -43,14 +43,14 @@
   - Verify: `bash scripts/verify-s01-sheet-contract.sh`
   - Done when: script source exists with explicit response-schema checks and verification script can assert required contract fields/functions.
 
-- [ ] **T02: Implement deterministic seat assignment and intake state transitions** `est:50m`
+- [x] **T02: Implement deterministic seat assignment and intake state transitions** `est:50m`
   - Why: Deliver the core behavior S02/S03 depend on: stable assignment and initial workflow state.
   - Files: `apps-script/Code.gs`, `fixtures/s01/intake-sequence.json`
   - Do: Implement deterministic `assignBatch_` logic (auto-shift, hard-cap, waitlist) and enforce initial state writes in `onFormSubmit`; persist payment-link pointer and intake notes.
   - Verify: `node scripts/verify-s01-seat-engine.mjs`
   - Done when: fixture-driven verification proves no batch overfill and expected assignment/status outputs for normal and overflow sequences.
 
-- [ ] **T03: Add diagnostics and setup-guard verification path** `est:35m`
+- [x] **T03: Add diagnostics and setup-guard verification path** `est:35m`
   - Why: Ensure operators and future agents can identify configuration failures and state anomalies quickly.
   - Files: `apps-script/Code.gs`, `scripts/verify-s01-sheet-contract.sh`, `05_setup_playbook.md`
   - Do: Add high-signal intake diagnostics (status/note codes + logs), finalize contract verification scripts, and update setup playbook with pre-launch checks.
