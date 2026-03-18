@@ -36,7 +36,7 @@
 
 ## Tasks
 
-- [ ] **T01: Version Apps Script intake contract from source docs** `est:40m`
+- [x] **T01: Version Apps Script intake contract from source docs** `est:40m`
   - Why: Convert markdown-only draft logic into a canonical script artifact with explicit schema and config guardrails.
   - Files: `apps-script/Code.gs`, `apps-script/README.md`
   - Do: Create the maintained Apps Script file, centralize CONFIG, add sheet/column contract assertions, and add normalization helpers for registration input fields.

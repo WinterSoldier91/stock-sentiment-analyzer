@@ -2,18 +2,18 @@
 
 **Active Milestone:** M001 — Launch-Ready Workshop Ops Core
 **Active Slice:** S01 — Registration Contract & Seat Engine
-**Active Task:** T01 — Version Apps Script intake contract from source docs
+**Active Task:** T02 — Implement deterministic seat assignment and intake state transitions
 **Phase:** Executing
 
 ## Recent Decisions
 - Expanded planning horizon from single milestone to a three-milestone sequence.
-- M001 remains active; downstream milestones stay queued behind dependency chain.
-- S01 decomposed into T01–T03 with contract-first verification commands.
-- S01 verification strategy is fixture/contract-level locally, with full real integration deferred to S04.
+- S01 uses contract-first local verification, with live integration proof deferred to S04.
+- Canonical Apps Script source is now versioned under `apps-script/Code.gs`.
+- Webhook reconciliation remains intentionally deferred to S02 hardening.
 - Preserved non-negotiable invariant: no ambiguous confirmations.
 
 ## Blockers
 - None
 
 ## Next Action
-Execute T01: create `apps-script/Code.gs` and `apps-script/README.md`, then run `bash scripts/verify-s01-sheet-contract.sh`.
+Execute T02: add fixture-driven seat assignment verification (`fixtures/s01/intake-sequence.json`, `scripts/verify-s01-seat-engine.mjs`) and make sure `node scripts/verify-s01-seat-engine.mjs` passes.
